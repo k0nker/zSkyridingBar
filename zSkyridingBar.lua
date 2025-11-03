@@ -209,6 +209,7 @@ function zSkyridingBar:OnInitialize()
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterEvent("PLAYER_LOGIN")
     eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    eventFrame:RegisterEvent("UNIT_AURA")
     eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
     eventFrame:SetScript("OnEvent", function(frame, event, ...)
@@ -220,6 +221,9 @@ function zSkyridingBar:OnInitialize()
             zSkyridingBar:OnPlayerLogin()
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
             zSkyridingBar:OnSpellcastSucceeded(event, ...)
+        elseif event == "UNIT_AURA" then
+            local unitTarget = select(1, ...)
+            zSkyridingBar:OnUnitAura(unitTarget)
         elseif event == "ZONE_CHANGED_NEW_AREA" then
             zSkyridingBar:OnZoneChanged()
         elseif event == "UNIT_POWER_UPDATE" then
@@ -500,7 +504,35 @@ function zSkyridingBar:OnZoneChanged()
     self:CheckSkyridingAvailability()
 end
 
+function zSkyridingBar:OnUnitAura(unitTarget)
+    -- Handle aura changes for immediate speed bar color updates
+    if unitTarget == "player" and active and speedBar then
+        -- Force an immediate color update when player auras change
+        -- This will catch Thrill of the Skies appearing/disappearing instantly
+        self:UpdateSpeedBarColors()
+    end
+end
 
+function zSkyridingBar:UpdateSpeedBarColors()
+    -- Lightweight function to update speed bar colors immediately
+    if not active or not speedBar then
+        return
+    end
+    
+    -- Check for Thrill of the Skies buff (same logic as Liroo)
+    local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
+    local time = GetTime()
+    local boosting = thrill and time < ascentStart + ASCENT_DURATION
+    
+    -- Update color based on state (matching Liroo's priority)
+    if boosting then
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarBoostColor)) -- Green for boosting
+    elseif thrill then
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarThrillColor)) -- Blue for thrill
+    else
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarColor)) -- Default orange
+    end
+end
 
 function zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
     -- Handle power updates for vigor
@@ -512,6 +544,10 @@ end
 function zSkyridingBar:OnSpellcastSucceeded(event, unitTarget, castGUID, spellId)
     if unitTarget == "player" and spellId == ASCENT_SPELL_ID then
         ascentStart = GetTime()
+        -- Immediately update speed bar color when ascent starts (for instant "boosting" color)
+        if active and speedBar then
+            self:UpdateSpeedBarColors()
+        end
     end
 end
 
@@ -588,11 +624,6 @@ function zSkyridingBar:UpdateTracking()
         end
     end
     
-    -- Check for Thrill of the Skies buff
-    local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
-    local time = GetTime()
-    local boosting = thrill and time < ascentStart + ASCENT_DURATION
-    
     -- Adjust speed for slow skyriding zones
     local adjustedSpeed = forwardSpeed
     if isSlowSkyriding then
@@ -618,14 +649,8 @@ function zSkyridingBar:UpdateTracking()
         speedText:SetText("")
     end
     
-    -- Update color based on state
-    if boosting then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarBoostColor)) -- Green for boosting
-    elseif thrill then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarThrillColor)) -- Blue for thrill
-    else
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarColor)) -- Default orange
-    end
+    -- Update color based on state using dedicated function
+    self:UpdateSpeedBarColors()
     
     -- Also update vigor/charge bars periodically (for 11.2.7 charge system)
     self:UpdateChargeBars()
