@@ -695,18 +695,22 @@ function zSkyridingBar:UpdateChargeBars()
                     bar:SetValue(100)
                     bar.currentValue = 100
                     bar.targetValue = 100
+                    bar:Show()
                 elseif i == charges + 1 and start and duration and duration > 0 then
                     -- Currently recharging (next charge) - smooth animation
                     local elapsed = GetTime() - start
                     local progress = math.min(100, (elapsed / duration) * 100)
                     updateChargeBarColor(bar, false, true)
                     smoothSetValue(bar, progress)
+                    bar:Show()
                 else
                     -- Empty charge - set instantly
                     updateChargeBarColor(bar, false, false)
                     bar:SetValue(0)
                     bar.currentValue = 0
                     bar.targetValue = 0
+                    -- Hide the bar with SetAlpha
+                    bar:Hide()
                 end
             end
         end
@@ -832,6 +836,8 @@ function zSkyridingBar:UpdateFrameAppearance()
     
     if chargeFrame then
         self:CreateChargeBars()
+
+        angleText:SetFont(self.db.profile.fontFace, self.db.profile.fontSize, self.db.profile.fontFlags)
     end
     
     -- Update speed indicator
