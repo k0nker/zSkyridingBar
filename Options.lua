@@ -2,12 +2,8 @@
 
 local zSkyridingBar = LibStub("AceAddon-3.0"):GetAddon("zSkyridingBar")
 
--- Get localization (using simple strings for now, can be expanded)
-local L = setmetatable({}, {
-    __index = function(t, k)
-        return k
-    end
-})
+-- Get localization from AceLocale
+local L = LibStub("AceLocale-3.0"):GetLocale("zSkyridingBar")
 
 -- Order counter for dynamic ordering
 local orderCounter = 0
@@ -86,13 +82,45 @@ local options = {
                 showRechargeIndicator = {
                     order = nextOrder(),
                     type = "toggle",
-                    name = L["Show Recharge Indicator"],
+                    name = L["Recharge Indicator"],
                     desc = L["Show indicator line at 60% on speed bar"],
                     get = function(info)
                         return zSkyridingBar.db.profile.showSpeedIndicator
                     end,
                     set = function(info, value)
                         zSkyridingBar.db.profile.showSpeedIndicator = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+
+                chargeRefreshSound = {
+                    order = nextOrder(),
+                    type = "select",
+                    name = L["Charge Refresh Sound"],
+                    desc = L["Sound to play when a skyriding charge refreshes"],
+                    values = {
+                        [0] = L["Disabled"],
+                        [200835] = L["Azerite Hammer"],
+                        [233592] = L["Ping Assist"],
+                        [233378] = L["Digsite Toast"],
+                    },
+                    get = function(info)
+                        -- Return 0 if sound is disabled, otherwise return the sound ID
+                        if zSkyridingBar.db.profile.chargeRefreshSound then
+                            return zSkyridingBar.db.profile.chargeRefreshSoundId
+                        else
+                            return 0
+                        end
+                    end,
+                    set = function(info, value)
+                        if value == 0 then
+                            zSkyridingBar.db.profile.chargeRefreshSound = false
+                        else
+                            zSkyridingBar.db.profile.chargeRefreshSound = true
+                            zSkyridingBar.db.profile.chargeRefreshSoundId = value
+                            -- Preview the selected sound
+                            zSkyridingBar:PreviewChargeSound()
+                        end
                         zSkyridingBar:RefreshConfig()
                     end,
                 },
@@ -432,8 +460,8 @@ local options = {
                 chargingChargeColor = {
                     order = nextOrder(),
                     type = "color",
-                    name = L["Charging Charge Color"],
-                    desc = L["Color when charge is charging fast"],
+                    name = L["Optimal Charge Color"],
+                    desc = L["Color when charge is charging at highest speed"],
                     hasAlpha = true,
                     get = function(info)
                         local color = zSkyridingBar.db.profile.chargeBarFastRechargeColor

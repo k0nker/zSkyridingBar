@@ -12,6 +12,7 @@ local ASCENT_DURATION = 3.5
 local TICK_RATE = 1 / 20  -- 20 FPS updates
 
 -- Fast flying zones (where full speed is available)
+-- Note: If a zone is not in this list, it will default to slow skyriding (70.5% speed)
 local FAST_FLYING_ZONES = {
   [2444] = true,   -- Dragon Isles
   [2454] = true,   -- Zaralek Cavern
@@ -88,6 +89,10 @@ local defaults = {
     fontSize = 12,
     fontFace = "Fonts\\FRIZQT__.TTF",
     fontFlags = "OUTLINE",
+    
+    -- Sound settings
+    chargeRefreshSound = true,
+    chargeRefreshSoundId = 233378,  -- Default: Azerite Hammer sound
   }
 }
 
@@ -98,6 +103,8 @@ local ascentStart = 0
 local isSlowSkyriding = true
 local mainFrame = nil
 local speedBar = nil
+local previousChargeCount = 0  -- Track previous charge count for sound notifications
+local chargesInitialized = false  -- Flag to skip sound on first check
 -- Main addon table
 zSkyridingBar = LibStub("AceAddon-3.0"):GetAddon("zSkyridingBar", true) or LibStub("AceAddon-3.0"):NewAddon("zSkyridingBar", "AceEvent-3.0", "AceTimer-3.0")
 
@@ -199,6 +206,12 @@ local function smoothSetValue(bar, targetValue)
     end, 1/60) -- 60 FPS updates
 end
 
+-- Play charge sound
+local function playChargeSound(soundId)
+    if not soundId or soundId == 0 then return end
+    -- Use PlaySound() to play sounds by their sound ID
+    PlaySound(soundId, "Master")
+end
 function zSkyridingBar:OnInitialize()
     -- Initialize database
     self.db = LibStub("AceDB-3.0"):New("zSkyridingBarDB", defaults, true)
@@ -211,6 +224,7 @@ function zSkyridingBar:OnInitialize()
     eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     eventFrame:RegisterEvent("UNIT_AURA")
     eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    eventFrame:RegisterEvent("ZONE_CHANGED")
     eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
     eventFrame:SetScript("OnEvent", function(frame, event, ...)
         if event == "ADDON_LOADED" and select(1, ...) == "zSkyridingBar" then
@@ -224,7 +238,7 @@ function zSkyridingBar:OnInitialize()
         elseif event == "UNIT_AURA" then
             local unitTarget = select(1, ...)
             zSkyridingBar:OnUnitAura(unitTarget)
-        elseif event == "ZONE_CHANGED_NEW_AREA" then
+        elseif event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED" then
             zSkyridingBar:OnZoneChanged()
         elseif event == "UNIT_POWER_UPDATE" then
             local unitTarget, powerType = select(1, ...), select(2, ...)
@@ -260,8 +274,8 @@ function zSkyridingBar:InitializeOptions()
 end
 
 function zSkyridingBar:OnEnable()
-    active = true
-    self:StartTracking()
+    -- Check if skyriding is available before activating
+    self:CheckSkyridingAvailability()
 end
 
 function zSkyridingBar:OnDisable()
@@ -341,6 +355,10 @@ function zSkyridingBar:RefreshConfig()
     end
 end
 
+-- Public function for preview sound from options
+function zSkyridingBar:PreviewChargeSound()
+    playChargeSound(self.db.profile.chargeRefreshSoundId)
+end
 function zSkyridingBar:CreateUI()
     -- Create main frame (sized to encompass speed bar + gap + vigor frame)
     local totalHeight = self.db.profile.speedBarHeight + 5 + 30 -- speed bar + gap + vigor frame
@@ -501,7 +519,8 @@ end
 
 function zSkyridingBar:OnZoneChanged()
     -- Update zone-specific settings
-    self:CheckSkyridingAvailability()
+    -- Add small delay to ensure zone data is fully loaded
+    self:ScheduleTimer(function() self:CheckSkyridingAvailability() end, 0.1)
 end
 
 function zSkyridingBar:OnUnitAura(unitTarget)
@@ -559,11 +578,10 @@ end
 function zSkyridingBar:CheckSkyridingAvailability()
     -- Check if dragonriding/skyriding is available
     local hasSkyriding = C_SpellBook.IsSpellInSpellBook(372610) -- Skyriding spell
-    local instanceType = select(2, GetInstanceInfo())
     local mapID = C_Map.GetBestMapForUnit("player")
     
-    -- Only show in outdoor areas where skyriding is available
-    if hasSkyriding and (instanceType == "none" or instanceType == "scenario") then
+    -- Show anywhere skyriding is available - let the game handle location restrictions
+    if hasSkyriding then
         isSlowSkyriding = not FAST_FLYING_ZONES[mapID]
         
         if not active then
@@ -579,8 +597,8 @@ function zSkyridingBar:CheckSkyridingAvailability()
 end
 
 function zSkyridingBar:StartTracking()
-    if not updateHandle and active then
-
+    if not updateHandle then
+        active = true
         
         -- Start update ticker
         updateHandle = self:ScheduleRepeatingTimer("UpdateTracking", TICK_RATE)
@@ -601,7 +619,8 @@ function zSkyridingBar:StopTracking()
         updateHandle = nil
     end
     
-
+    previousChargeCount = 0  -- Reset charge tracking when stopping
+    chargesInitialized = false  -- Reset init flag so sound doesn't play on next login
     
     -- Hide main frame
     if mainFrame then
@@ -610,7 +629,15 @@ function zSkyridingBar:StopTracking()
 end
 
 function zSkyridingBar:UpdateTracking()
-    if not active or not mainFrame or not speedBar then
+    -- Periodically check if we should be active (catches reload scenarios)
+    if not active then
+        self:CheckSkyridingAvailability()
+        if not active then
+            return
+        end
+    end
+    
+    if not mainFrame or not speedBar then
         return
     end
     
@@ -692,6 +719,15 @@ function zSkyridingBar:UpdateChargeBars()
         local maxCharges = spellChargeInfo.maxCharges
         local start = spellChargeInfo.cooldownStartTime
         local duration = spellChargeInfo.cooldownDuration
+        
+        -- Check if a charge refreshed and play sound if enabled
+        if self.db.profile.chargeRefreshSound and charges > previousChargeCount and chargesInitialized then
+            -- Play the selected charge sound
+            playChargeSound(self.db.profile.chargeRefreshSoundId)
+        end
+        previousChargeCount = charges
+        chargesInitialized = true
+        
         -- Show bars up to maxCharges (should be 6)
         for i = 1, math.min(maxCharges, 6) do
             local bar = chargeFrame.bars[i]
