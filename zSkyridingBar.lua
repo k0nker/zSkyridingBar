@@ -92,7 +92,7 @@ local defaults = {
     
     -- Sound settings
     chargeRefreshSound = true,
-    chargeRefreshSoundId = 233378,  -- Default: Azerite Hammer sound
+    chargeRefreshSoundId = 39516,  -- Default: Store Purchase sound
   }
 }
 

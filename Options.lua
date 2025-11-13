@@ -100,9 +100,20 @@ local options = {
                     desc = L["Sound to play when a skyriding charge refreshes"],
                     values = {
                         [0] = L["Disabled"],
+                        [39516] = L["Store Purchase"],
+                        [90104] = L["Ting!"],
+                        [171373] = L["Contribute"],
                         [200835] = L["Azerite Hammer"],
-                        [233592] = L["Ping Assist"],
+                        [213208] = L["Renown Whoosh"],
+                        [231912] = L["Stereo Toast Low"],
                         [233378] = L["Digsite Toast"],
+                        [233592] = L["Ping Assist"],
+                        [237328] = L["Lightwell"],
+                        [241984] = L["Holy Impact"],
+                        [254762] = L["Stereo Toast High"],
+                        [278769] = L["Chime"],
+                        [303828] = L["Store Toast"],
+
                     },
                     get = function(info)
                         -- Return 0 if sound is disabled, otherwise return the sound ID
