@@ -1,20 +1,35 @@
-## Interface: 110205
+## Interface: 120000
 ## Title: zSkyridingBar
 ## Notes: Skyriding bar for tracking speed and charges
 ## Author: k0nker
-## Version: 2025.1111.01
+## Version: 2025.1114.01a
 ## SavedVariables: zSkyridingBarDB
+## IconTexture: Interface\AddOns\zSkyridingBar\zSkyridingBar.tga
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3, LibSharedMedia-3.0
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
 Libs\AceAddon-3.0\AceAddon-3.0.xml
+Libs\AceGUI-3.0\AceGUI-3.0.xml
 Libs\AceDB-3.0\AceDB-3.0.xml
 Libs\AceDBOptions-3.0\AceDBOptions-3.0.xml
 Libs\AceConfig-3.0\AceConfig-3.0.xml
-Libs\AceGUI-3.0\AceGUI-3.0.xml
 Libs\AceTimer-3.0\AceTimer-3.0.xml
+Libs\AceLocale-3.0\AceLocale-3.0.xml
 Libs\LibSharedMedia-3.0\lib.xml
+
+Locales\enUS.lua
+Locales\enGB.lua
+Locales\deDE.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Locales\koKR.lua
+Locales\itIT.lua
 
 zSkyridingBar.lua
 Options.lua
