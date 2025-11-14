@@ -79,6 +79,24 @@ local options = {
             name = L["General"],
             inline = true,
             args = {
+                theme = {
+                    order = nextOrder(),
+                    type = "select",
+                    name = L["Theme"],
+                    desc = L["Choose UI theme (Classic or Modern)"],
+                    values = {
+                        classic = L["Classic"],
+                        modern = L["Modern"],
+                    },
+                    get = function(info)
+                        return zSkyridingBar.db.profile.theme or "classic"
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.theme = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+
                 showRechargeIndicator = {
                     order = nextOrder(),
                     type = "toggle",

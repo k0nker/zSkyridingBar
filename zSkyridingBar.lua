@@ -574,7 +574,7 @@ function zSkyridingBar:OnUnitAura(unitTarget)
     end
 end
 
-function zSkyridingBar:UpdateSpeedBarColors()
+function zSkyridingBar:UpdateSpeedBarColors(currentSpeed)
     -- Lightweight function to update speed bar colors immediately
     if not active or not speedBar then
         return
@@ -585,18 +585,21 @@ function zSkyridingBar:UpdateSpeedBarColors()
         return
     end
     
-    -- Check for Thrill of the Skies buff (same logic as Liroo)
-    local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
     local time = GetTime()
-    local boosting = thrill and time < ascentStart + ASCENT_DURATION
     
-    -- Update color based on state (matching Liroo's priority)
+    -- Check for Thrill of the Skies buff (indicates recharge is active)
+    local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
+    
+    -- Check if Ascent was cast recently (within 3.5 seconds) AND Thrill is active - this is the "boosting" state
+    local boosting = thrill and time < ascentStart + ASCENT_DURATION
+
+    -- Update color based on state (priority: boosting > thrill (recharging) > default)
     if boosting then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarBoostColor)) -- Green for boosting
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarBoostColor))  -- Boost color when ascending with thrill
     elseif thrill then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarThrillColor)) -- Blue for thrill
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarThrillColor)) -- Thrill color when recharging
     else
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarColor)) -- Default orange
+        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarColor))       -- Default color for normal speed
     end
 end
 
@@ -736,7 +739,7 @@ function zSkyridingBar:UpdateTracking()
     end
     
     -- Update color based on state using dedicated function
-    self:UpdateSpeedBarColors()
+    self:UpdateSpeedBarColors(forwardSpeed)
     
     -- Also update vigor/charge bars periodically (for 11.2.7 charge system)
     self:UpdateChargeBars()
