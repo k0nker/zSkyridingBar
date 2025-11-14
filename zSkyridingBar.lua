@@ -70,9 +70,9 @@ local defaults = {
         speedBarWidth = 256,
         speedBarHeight = 18,
         speedBarTexture = getDefaultTexture(),
-        speedBarColor = { 0.749, 0.439, 0.173, 1 },       -- not recharging
-        speedBarThrillColor = { 0.314, 0.537, 0.157, 1 }, -- recharging, but at an optimal speed
-        speedBarBoostColor = { 0.2, 0.4, 0.45, 1 },       -- super fast color
+        speedBarColor = { 0.749, 0.439, 0.173, 1 }, -- below 60% speed
+        speedBarThrillColor = {0.482, 0.667, 1, 1}, -- optimal speed with Thrill of the Skies applied
+        speedBarBoostColor = {0.314, 0.537, 0.157, 1},       -- fast speed above 60% threshold
         speedBarBackgroundColor = { 0, 0, 0, 0.4 },
 
         -- Charge bar settings
