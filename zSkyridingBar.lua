@@ -58,7 +58,7 @@ local defaults = {
         speedShow = true,
         speedUnits = 2,    -- 1 = yd/s, 2 = move%
         hideDefaultSpeedUI = true,
-        theme = "classic", -- "classic" or "thick"
+        theme = "thick", -- "classic" or "thick"
 
         -- Position settings
         frameX = 0,
