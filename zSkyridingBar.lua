@@ -58,7 +58,7 @@ local defaults = {
         speedShow = true,
         speedUnits = 2,    -- 1 = yd/s, 2 = move%
         hideDefaultSpeedUI = true,
-        theme = "classic", -- "classic" or "modern"
+        theme = "classic", -- "classic" or "thick"
 
         -- Position settings
         frameX = 0,
@@ -75,7 +75,7 @@ local defaults = {
         speedBarBoostColor = { 0.2, 0.4, 0.45, 1 },       -- super fast color
         speedBarBackgroundColor = { 0, 0, 0, 0.4 },
 
-        -- Vigor bar settings
+        -- Charge bar settings
         chargeBarWidth = 256,
         chargeBarHeight = 12,
         chargeBarSpacing = 2,
@@ -115,14 +115,14 @@ local THEMES = {
         chargeBarTexture = "default", -- Will use current texture
         borderSize = 2,
     },
-    modern = {
-        name = "Modern",
+    thick = {
+        name = "Thick",
         speedBarHeight = 28,
         chargeBarHeight = 22,
         chargeBarSpacing = 0,
         speedChargeSpacing = 0,
         speedIndicatorHeight = 28,
-        chargeBarTexture = "Solid", -- Use Solid texture for modern look
+        chargeBarTexture = "Solid", -- Use Solid texture for thick look
         borderSize = 0,
     },
 }
@@ -184,8 +184,8 @@ local C_PlayerInfo = C_PlayerInfo
 local C_UnitAuras = C_UnitAuras
 
 
--- Get vigor recharge speed based on current buffs/conditions
-local function getVigorRechargeSpeed()
+-- Get charge recharge speed based on current buffs/conditions
+local function getChargeRechargeSpeed()
     -- Check for Thrill of the Skies buff
     local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
     if thrill then
@@ -204,7 +204,7 @@ local function updateChargeBarColor(bar, isFull, isRecharging)
         color = zSkyridingBar.db.profile.chargeBarFullColor
         bar.isFull = true
     elseif isRecharging then
-        local rechargeSpeed = getVigorRechargeSpeed()
+        local rechargeSpeed = getChargeRechargeSpeed()
         bar.rechargeSpeed = rechargeSpeed
 
         if rechargeSpeed == "fast" then
@@ -363,7 +363,7 @@ function zSkyridingBar:RefreshConfig()
             for _, line in ipairs(speedBarRef.borderLines) do
                 line:Hide()
             end
-            -- For modern theme, show only the bottom line
+            -- For thick theme, show only the bottom line
             speedBarRef.borderLines[2]:Show()
         end
     end
@@ -410,23 +410,23 @@ function zSkyridingBar:RefreshConfig()
             end
         end
 
-        -- Update vigor frame size, position, and textures
+        -- Update charge frame size, position, and textures
         if chargeFrame then
             chargeFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.chargeBarHeight)
             chargeFrame:ClearAllPoints()
             chargeFrame:SetPoint("TOPRIGHT", speedBar, "BOTTOMRIGHT", 0, self.db.profile.speedChargeSpacing)
 
-            -- Update vigor bar textures and background colors
-            local vigorTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.chargeBarTexture) or
+            -- Update charge bar textures and background colors
+            local chargeTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.chargeBarTexture) or
                 "Interface\\TargetingFrame\\UI-StatusBar"
             for i = 1, 6 do
                 local bar = chargeFrame["bar" .. i]
                 if bar then
-                    bar:SetStatusBarTexture(vigorTexture)
+                    bar:SetStatusBarTexture(chargeTexture)
                     bar:SetSize((self.db.profile.speedBarWidth - ((6 - 1) * self.db.profile.chargeBarSpacing)) / 6,
                         self.db.profile.chargeBarHeight)
                     if bar.bg then
-                        bar.bg:SetTexture(vigorTexture)
+                        bar.bg:SetTexture(chargeTexture)
                         bar.bg:SetVertexColor(unpack(self.db.profile.chargeBarBackgroundColor))
                     end
                 end
@@ -438,7 +438,7 @@ function zSkyridingBar:RefreshConfig()
             self.db.profile.chargeBarHeight
         mainFrame:SetSize(self.db.profile.speedBarWidth, totalHeight)
 
-        -- Update default vigor UI visibility
+        -- Update default charge UI visibility
     end
 end
 
@@ -521,7 +521,7 @@ function zSkyridingBar:CreateUI()
         for _, line in ipairs(speedBar.borderLines) do
             line:Hide()
         end
-        -- For modern theme, show only the bottom line (index 2)
+        -- For thick theme, show only the bottom line (index 2)
         speedBar.borderLines[2]:Show()
     end
 
@@ -594,8 +594,8 @@ function zSkyridingBar:CreateUI()
     staticChargeText:SetText("")
     staticChargeText:Hide()
 
-    -- Create vigor frame (will hold multiple vigor bars)
-    chargeFrame = CreateFrame("Frame", "zSkyridingBarVigorFrame", mainFrame)
+    -- Create charge frame (will hold multiple charge bars)
+    chargeFrame = CreateFrame("Frame", "zSkyridingBarChargeFrame", mainFrame)
     chargeFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.chargeBarHeight)
     chargeFrame:SetPoint("TOPRIGHT", speedBar, "BOTTOMRIGHT", 0, self.db.profile.speedChargeSpacing)
 
@@ -606,7 +606,7 @@ function zSkyridingBar:CreateUI()
 end
 
 function zSkyridingBar:CreateChargeBars()
-    -- Create individual vigor charge bars
+    -- Create individual charge charge bars
     if not chargeFrame then
         return
     end
@@ -624,7 +624,7 @@ function zSkyridingBar:CreateChargeBars()
     chargeFrame.bars = {}
 
     -- Create new bars (typically 3-6 charges for skyriding)
-    local numBars = 6 -- Max possible vigor charges
+    local numBars = 6 -- Max possible charge charges
     local barWidth = (self.db.profile.chargeBarWidth - ((numBars - 1) * self.db.profile.chargeBarSpacing)) / numBars
 
     for i = 1, numBars do
@@ -637,9 +637,9 @@ function zSkyridingBar:CreateChargeBars()
             bar:SetPoint("LEFT", chargeFrame.bars[i - 1], "RIGHT", self.db.profile.chargeBarSpacing, 0)
         end
 
-        local vigorTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.chargeBarTexture) or
+        local chargeTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.chargeBarTexture) or
             "Interface\\TargetingFrame\\UI-StatusBar"
-        bar:SetStatusBarTexture(vigorTexture)
+        bar:SetStatusBarTexture(chargeTexture)
         -- Don't set initial color here - let updateChargeBarColor handle it
         bar:SetMinMaxValues(0, 100) -- Use 0-100 range for better precision
         bar:SetValue(0)
@@ -654,7 +654,7 @@ function zSkyridingBar:CreateChargeBars()
         -- Background
         local bg = bar:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetTexture(vigorTexture)
+        bg:SetTexture(chargeTexture)
         bg:SetVertexColor(unpack(self.db.profile.chargeBarBackgroundColor))
         bar.bg = bg
 
@@ -689,7 +689,7 @@ function zSkyridingBar:CreateChargeBars()
             rightLine:SetWidth(1)
         end
 
-        if self.db.profile.theme == "modern" and i ~= 1 then
+        if self.db.profile.theme == "thick" and i ~= 1 then
             local chargeIndicator = bar:CreateTexture(nil, "OVERLAY")
             chargeIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
             chargeIndicator:SetSize(1, self.db.profile.chargeBarHeight)
@@ -764,7 +764,7 @@ function zSkyridingBar:UpdateSpeedBarColors(currentSpeed)
 end
 
 function zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
-    -- Handle power updates for vigor
+    -- Handle power updates for charge
     if unitTarget == "player" and powerType == "ALTERNATE" then
         self:UpdateChargeBars()
     end
@@ -811,7 +811,7 @@ function zSkyridingBar:StartTracking()
             mainFrame:Show()
         end
 
-        -- Initial vigor update
+        -- Initial charge update
         self:UpdateChargeBars()
     end
 end
@@ -905,7 +905,7 @@ function zSkyridingBar:UpdateTracking()
     -- Pass forwardSpeed so we can check if we're at optimal speed threshold
     self:UpdateSpeedBarColors(forwardSpeed)
 
-    -- Also update vigor/charge bars periodically (for 11.2.7 charge system)
+    -- Also update charge/charge bars periodically (for 11.2.7 charge system)
     self:UpdateChargeBars()
 
     -- Update Static Charge display
@@ -1164,7 +1164,7 @@ function zSkyridingBar:UpdateFrameAppearance()
             for _, line in ipairs(speedBar.borderLines) do
                 line:Hide()
             end
-            -- For modern theme, show only the bottom line
+            -- For thick theme, show only the bottom line
             speedBar.borderLines[2]:Show()
         end
     end

@@ -83,10 +83,10 @@ local options = {
                     order = nextOrder(),
                     type = "select",
                     name = L["Theme"],
-                    desc = L["Choose UI theme (Classic or Modern)"],
+                    desc = L["Choose UI theme (Classic or Thick)"],
                     values = {
                         classic = L["Classic"],
-                        modern = L["Modern"],
+                        thick = L["Thick"],
                     },
                     get = function(info)
                         return zSkyridingBar.db.profile.theme or "classic"
