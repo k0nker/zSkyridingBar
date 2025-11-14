@@ -1,10 +1,9 @@
 -- zSkyridingBar - A standalone skyriding information addon
--- Ported from Liroo - Dragonriding WeakAuras
 
 -- Initialize Ace addon
 local zSkyridingBar = LibStub("AceAddon-3.0"):NewAddon("zSkyridingBar", "AceTimer-3.0")
 
--- Constants from WeakAuras
+-- Constants
 local ASCENT_SPELL_ID = 372610
 local THRILL_BUFF_ID = 377234
 local STATIC_CHARGE_BUFF_ID = 418590
@@ -187,7 +186,7 @@ local C_UnitAuras = C_UnitAuras
 
 -- Get vigor recharge speed based on current buffs/conditions
 local function getVigorRechargeSpeed()
-    -- Simple approach like WeakAuras - just check for Thrill of the Skies buff
+    -- Check for Thrill of the Skies buff
     local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
     if thrill then
         return "fast"
@@ -205,7 +204,6 @@ local function updateChargeBarColor(bar, isFull, isRecharging)
         color = zSkyridingBar.db.profile.chargeBarFullColor
         bar.isFull = true
     elseif isRecharging then
-        -- Check for Thrill of the Skies buff like WeakAuras does
         local rechargeSpeed = getVigorRechargeSpeed()
         bar.rechargeSpeed = rechargeSpeed
 
@@ -471,7 +469,7 @@ function zSkyridingBar:CreateUI()
         "Interface\\TargetingFrame\\UI-StatusBar"
     speedBar:SetStatusBarTexture(speedTexture)
     speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarColor))
-    speedBar:SetMinMaxValues(20, 100) -- Min/Max from WeakAuras
+    speedBar:SetMinMaxValues(20, 100)
     speedBar:SetValue(0)
 
     -- Speed bar background
@@ -845,6 +843,11 @@ function zSkyridingBar:UpdateTracking()
     if not mainFrame or not speedBar then
         return
     end
+
+    -- Update zone check to ensure isSlowSkyriding is current
+    local mapID = C_Map.GetBestMapForUnit("player")
+    
+    isSlowSkyriding = not FAST_FLYING_ZONES[select(8, GetInstanceInfo())]
 
     -- Get current skyriding info
     local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
