@@ -252,6 +252,7 @@ local options = {
                     end,
                     set = function(info, value)
                         zSkyridingBar.db.profile.frameScale = value
+                        zSkyridingBar:UpdateFramePositions()
                         zSkyridingBar:RefreshConfig()
                     end,
                     isPercent = true,
@@ -264,14 +265,21 @@ local options = {
                     desc = L["Reset position and size settings to defaults"],
                     func = function()
                         local defaults = zSkyridingBar.db.defaults.profile
-                        zSkyridingBar.db.profile.frameX = defaults.frameX
-                        zSkyridingBar.db.profile.frameY = defaults.frameY
+                        zSkyridingBar.db.profile.speedBarX = defaults.speedBarX
+                        zSkyridingBar.db.profile.speedBarY = defaults.speedBarY
+                        zSkyridingBar.db.profile.chargesBarX = defaults.chargesBarX
+                        zSkyridingBar.db.profile.chargesBarY = defaults.chargesBarY
+                        zSkyridingBar.db.profile.speedAbilityX = defaults.speedAbilityX
+                        zSkyridingBar.db.profile.speedAbilityY = defaults.speedAbilityY
+                        zSkyridingBar.db.profile.secondWindX = defaults.secondWindX
+                        zSkyridingBar.db.profile.secondWindY = defaults.secondWindY
                         zSkyridingBar.db.profile.frameScale = defaults.frameScale
                         zSkyridingBar.db.profile.frameStrata = defaults.frameStrata
                         zSkyridingBar.db.profile.speedBarWidth = defaults.speedBarWidth
                         zSkyridingBar.db.profile.speedBarHeight = defaults.speedBarHeight
                         zSkyridingBar.db.profile.chargeBarWidth = defaults.chargeBarWidth
                         zSkyridingBar.db.profile.chargeBarHeight = defaults.chargeBarHeight
+                        zSkyridingBar:UpdateFramePositions()
                         zSkyridingBar:RefreshConfig()
                         zSkyridingBar:Print(L["Reset position and size to defaults."])
                     end,
@@ -535,8 +543,92 @@ local options = {
                     type = "description",
                     name = "",
                 },
-
-
+                noSecondWindChargeColor = {
+                    order = nextOrder(),
+                    type = "color",
+                    name = L["No Wind"],
+                    desc = L["Color when there are no second wind charges"],
+                    hasAlpha = true,
+                    get = function(info)
+                        local color = zSkyridingBar.db.profile.secondWindNoChargeColor
+                        if not color then 
+                            local defaults = zSkyridingBar.db.defaults.profile.secondWindNoChargeColor
+                            return defaults[1], defaults[2], defaults[3], defaults[4]
+                        end
+                        return color[1], color[2], color[3], color[4]
+                    end,
+                    set = function(info, r, g, b, a)
+                        zSkyridingBar.db.profile.secondWindNoChargeColor = { r, g, b, a }
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                oneSecondWindChargeColor = {
+                    order = nextOrder(),
+                    type = "color",
+                    name = L["One Wind"],
+                    desc = L["Color when there is 1 second wind charge"],
+                    hasAlpha = true,
+                    get = function(info)
+                        local color = zSkyridingBar.db.profile.secondWindOneChargeColor
+                        if not color then 
+                            local defaults = zSkyridingBar.db.defaults.profile.secondWindOneChargeColor
+                            return defaults[1], defaults[2], defaults[3], defaults[4]
+                        end
+                        return color[1], color[2], color[3], color[4]
+                    end,
+                    set = function(info, r, g, b, a)
+                        zSkyridingBar.db.profile.secondWindOneChargeColor = { r, g, b, a }
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                spacer6 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                },
+                twoSecondWindChargeColor = {
+                    order = nextOrder(),
+                    type = "color",
+                    name = L["Two Winds"],
+                    desc = L["Color when there are 2 second wind charges"],
+                    hasAlpha = true,
+                    get = function(info)
+                        local color = zSkyridingBar.db.profile.secondWindTwoChargeColor
+                        if not color then 
+                            local defaults = zSkyridingBar.db.defaults.profile.secondWindTwoChargeColor
+                            return defaults[1], defaults[2], defaults[3], defaults[4]
+                        end
+                        return color[1], color[2], color[3], color[4]
+                    end,
+                    set = function(info, r, g, b, a)
+                        zSkyridingBar.db.profile.secondWindTwoChargeColor = { r, g, b, a }
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                threeSecondWindChargeColor = {
+                    order = nextOrder(),
+                    type = "color",
+                    name = L["Three Wind"],
+                    desc = L["Color when there are 3 second wind charges"],
+                    hasAlpha = true,
+                    get = function(info)
+                        local color = zSkyridingBar.db.profile.secondWindThreeChargeColor
+                        if not color then 
+                            local defaults = zSkyridingBar.db.defaults.profile.secondWindThreeChargeColor
+                            return defaults[1], defaults[2], defaults[3], defaults[4]
+                        end
+                        return color[1], color[2], color[3], color[4]
+                    end,
+                    set = function(info, r, g, b, a)
+                        zSkyridingBar.db.profile.secondWindThreeChargeColor = { r, g, b, a }
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                spacer7 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                },
                 resetColors = {
                     order = nextOrder(),
                     type = "execute",
@@ -557,6 +649,10 @@ local options = {
                         zSkyridingBar.db.profile.chargeBarTexture = defaults.chargeBarTexture
                         zSkyridingBar.db.profile.speedBarBackgroundColor = defaults.speedBarBackgroundColor
                         zSkyridingBar.db.profile.chargeBarBackgroundColor = defaults.chargeBarBackgroundColor
+                        zSkyridingBar.db.profile.secondWindNoChargeColor = defaults.secondWindNoChargeColor
+                        zSkyridingBar.db.profile.secondWindOneChargeColor = defaults.secondWindOneChargeColor
+                        zSkyridingBar.db.profile.secondWindTwoChargeColor = defaults.secondWindTwoChargeColor
+                        zSkyridingBar.db.profile.secondWindThreeChargeColor = defaults.secondWindThreeChargeColor
                         zSkyridingBar:RefreshConfig()
                         zSkyridingBar:Print(L["Reset colors and textures to defaults."])
                     end,

@@ -81,3 +81,13 @@ L["Recharge Indicator Color"] = "Recharge Indicator Color"
 L["Reset all settings to default."] = "Reset all settings to default."
 L["Reset colors and textures to defaults."] = "Reset colors and textures to defaults."
 L["Reset position and size to defaults."] = "Reset position and size to defaults."
+
+L["No Wind"] = "No Wind"
+L["Color when there are no second wind charges"] = "Color when there are no second wind charges"
+L["One Wind"] = "One Wind"
+L["Color when there is 1 second wind charge"] = "Color when there is 1 second wind charge"
+L["Two Winds"] = "Two Winds"
+L["Color when there are 2 second wind charges"] = "Color when there are 2 second wind charges"
+L["Three Wind"] = "Three Wind"
+L["Color when there are 3 second wind charges"] = "Color when there are 3 second wind charges"
+

@@ -1,0 +1,11 @@
+All strings a user sees should be localized, be sure to add them to all localization files. Also, check when I make changes to add to localization files too. Default to adding them to every localization file we have, with translations for all languages if you can translate. This includes deDE, enGB, enUS, esES, esMX, frFR, itIT, jaJP, koKR, ptBR, ruRU, zhCN, zhTW.
+
+Don't make extra files to explain changes. No summary documents or anything like that. Not helpful. You can summarize in the chat, but don't make a new file for it.
+
+If we are referencing another addon or library and using something from there or mimicing them, don't reference them in the code comments. Add a single line at the top of our main lua file and just add that as a credits reference. No need to reference them throughout the code.
+
+When possible, use the Defaults.lua file to set default values for new settings. Don't hardcode a setting in the code if we already have a table of data for it, like default settings etc. If the user can also change it, use the users choice, and if the users choice doesn't exist use the default.
+
+When making changes, try to keep the style consistent with the existing codebase unless there is a good reason to change it. For example, we are trying to stay modularized, so avoid making big monolithic functions that do a lot of different things. Break them up into smaller helper functions when possible. We already have a lot of helper functions and code, so reference what we already have in other files when possible instead of making new code that does the same thing.
+
+Always use deep reasoning and check that what you change makes sense in the context of the entire addon. Don't just make a change that works in isolation but breaks something else or doesn't fit with the overall design of the addon. If you remove a function, or change it, check where it was called and where it's used and be sure to update those references too. If you change a setting name or variable name, check where it's used throughout the codebase and update all those references too.
