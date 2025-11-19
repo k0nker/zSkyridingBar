@@ -37,6 +37,10 @@ local FAST_FLYING_ZONES = {
 local SLOW_ZONE_MAX_GLIDE = 55.2 -- Max gliding speed in normal zones (789%)
 local FAST_ZONE_MAX_GLIDE = 65.0 -- Max gliding speed in Dragonflight zones (929%)
 
+function zSkyridingBar.print(msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cff33ff99zSkyridingBar:|r " .. msg)
+end
+
 -- Function to get default texture based on availability
 local function getDefaultTexture()
     local LSM = LibStub("LibSharedMedia-3.0", true)
@@ -412,11 +416,14 @@ function zSkyridingBar:OnInitialize()
     self.db.RegisterCallback(self, "OnProfileCopied", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileReset", "RefreshConfig")
 end
-
+BuildInterface = 0
 function zSkyridingBar:OnPlayerLogin()
     -- Apply fonts after a short delay to ensure LibSharedMedia is ready
     C_Timer.After(2.5, function()
         self:UpdateFonts()
+        local v,b,d,i=GetBuildInfo()
+        BuildInterface = i
+        zSkyridingBar.print("Detected interface version " .. BuildInterface)
     end)
     self:InitializeOptions()
 end
