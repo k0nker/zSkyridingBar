@@ -355,14 +355,19 @@ local function createMoveableFrameHeader(frame, frameName)
         if moveMode and not InCombatLockdown() then
             self:StartMoving()
         else
-            self.print("Cannot move frame while in combat. Retry after combat ends.")
+            if zSkyridingBar.print then
+                zSkyridingBar.print("Cannot move frame while in combat. Retry after combat ends.")
+            end
             return
         end
     end)
 
     frame:SetScript("OnDragStop", function(self)
         if InCombatLockdown() then
-            self.print("Cannot move frame while in combat. Retry after combat ends.")
+            if zSkyridingBar.print then
+                zSkyridingBar.print("Ended frame movement in combat. Position may not save after reload.")
+            end
+            self:StopMovingOrSizing()
             return
         end
         self:StopMovingOrSizing()
@@ -413,6 +418,7 @@ function zSkyridingBar:OnInitialize()
     eventFrame:RegisterEvent("ZONE_CHANGED")
     eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
     eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+    eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     if CompatCheck then
         eventFrame:RegisterEvent("UPDATE_UI_WIDGET")
     end
@@ -447,6 +453,10 @@ function zSkyridingBar:OnInitialize()
             if CompatCheck then
                 local widgetInfo = select(1, ...)
                 zSkyridingBar:UpdateVigorFromWidget(widgetInfo)
+            end
+        elseif event == "PLAYER_REGEN_DISABLED" then
+            if moveMode then
+                zSkyridingBar:ToggleMoveMode()
             end
         end
     end)
@@ -581,7 +591,7 @@ function zSkyridingBar:RefreshConfig()
     -- Update frame positions and appearance without destroying
     --self:UpdateFramePositions()
     if InCombatLockdown() then
-        self.print("Cannot update UI while in combat. Retry after combat ends.")
+        zSkyridingBar.print("Cannot update UI while in combat. Retry after combat ends.")
         return
     end
     self:UpdateAllFrameAppearance()
@@ -602,7 +612,7 @@ function zSkyridingBar:CreateAllFrames()
     self:CreateSpeedAbilityFrame()
     self:CreateSecondWindFrame()
     if InCombatLockdown() then
-        self.print("Cannot update UI while in combat. Retry after combat ends.")
+        zSkyridingBar.print("Cannot update UI while in combat. Retry after combat ends.")
         return
     end
     if CompatCheck then
@@ -1022,10 +1032,17 @@ function zSkyridingBar:UpdateAllFrameAppearance()
 end
 
 function zSkyridingBar:ToggleMoveMode()
+    if InCombatLockdown() then
+        zSkyridingBar.print("Cannot use move mode while in combat.")
+    end
     moveMode = not moveMode
 
+    if InCombatLockdown() then
+        moveMode = false
+    end
+
     if moveMode then
-        print("|cff00ff00zSkyridingBar|r: |cffFFFFFFMove mode enabled|r - Drag frames to reposition.")
+        zSkyridingBar.print("Move mode enabled - Drag frames to reposition.")
 
         if speedBarFrame then showMoveBackground(speedBarFrame) end
         if chargesBarFrame then showMoveBackground(chargesBarFrame) end
@@ -1041,12 +1058,24 @@ function zSkyridingBar:ToggleMoveMode()
             speedAbilityFrame.moveBackground:Show()
         end
     else
-        print("|cff00ff00zSkyridingBar|r: |cffFFFFFFMove mode disabled|r")
+        zSkyridingBar.print("Move mode disabled")
 
-        if speedBarFrame then hideMoveBackground(speedBarFrame) end
-        if chargesBarFrame then hideMoveBackground(chargesBarFrame) end
-        if speedAbilityFrame then hideMoveBackground(speedAbilityFrame) end
-        if secondWindFrame then hideMoveBackground(secondWindFrame) end
+        if speedBarFrame then
+            hideMoveBackground(speedBarFrame)
+            speedBarFrame:StopMovingOrSizing()
+        end
+        if chargesBarFrame then
+            hideMoveBackground(chargesBarFrame)
+            chargesBarFrame:StopMovingOrSizing()
+        end
+        if speedAbilityFrame then
+            hideMoveBackground(speedAbilityFrame)
+            speedAbilityFrame:StopMovingOrSizing()
+        end
+        if secondWindFrame then
+            hideMoveBackground(secondWindFrame)
+            secondWindFrame:StopMovingOrSizing()
+        end
 
         -- Reshow based on current active state
         if active then
@@ -1789,11 +1818,7 @@ SlashCmdList["ZSKYRIDINGBAR"] = function(msg)
             print("|cff00ff00zSkyridingBar|r: Options not ready yet.")
         end
     elseif msg == "move" then
-        if not InCombatLockdown() then
-            zSkyridingBar:ToggleMoveMode()
-        else
-            print("|cff00ff00zSkyridingBar|r: Cannot move frames while in combat!")
-        end
+        zSkyridingBar:ToggleMoveMode()
     else
         print("|cff00ff00zSkyridingBar|r commands:")
         print("  |cffFFFFFF/zsb|r - Open options")
