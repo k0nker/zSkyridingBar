@@ -91,6 +91,7 @@ local defaults = {
         secondWindY = -216,
         frameScale = 1,
         frameStrata = "MEDIUM",
+        singleFrameMode = false,
 
         -- Speed bar settings
         speedBarWidth = 256,
@@ -424,24 +425,35 @@ function zSkyridingBar:OnInitialize()
     end
 
     eventFrame:SetScript("OnEvent", function(frame, event, ...)
+        if InCombatLockdown() then return end
+        if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
         if event == "ADDON_LOADED" and select(1, ...) == "zSkyridingBar" then
             zSkyridingBar:OnAddonLoaded()
+            if InCombatLockdown() then return end
         elseif event == "PLAYER_ENTERING_WORLD" then
             zSkyridingBar:OnPlayerEnteringWorld()
+            if InCombatLockdown() then return end
         elseif event == "PLAYER_LOGIN" then
             zSkyridingBar:OnPlayerLogin()
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if InCombatLockdown() then return end
+            if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             zSkyridingBar:OnSpellcastSucceeded(event, ...)
         elseif event == "UNIT_AURA" then
-            local unitTarget = select(1, ...)
             if InCombatLockdown() then return end
+            if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
+            local unitTarget = select(1, ...)
             zSkyridingBar:OnUnitAura(unitTarget)
         elseif event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED" then
             zSkyridingBar:OnZoneChanged()
         elseif event == "UNIT_POWER_UPDATE" then
+            if InCombatLockdown() then return end
+            if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             local unitTarget, powerType = select(1, ...), select(2, ...)
             zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
         elseif event == "PLAYER_CAN_GLIDE_CHANGED" then
+            if InCombatLockdown() then return end
+            if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             zSkyridingBar:CheckSkyridingAvailability()
             local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
             if not isGliding and not isFlying then
@@ -450,6 +462,8 @@ function zSkyridingBar:OnInitialize()
                 hasSkyriding = true
             end
         elseif event == "UPDATE_UI_WIDGET" then
+            if InCombatLockdown() then return end
+            if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             if CompatCheck then
                 local widgetInfo = select(1, ...)
                 zSkyridingBar:UpdateVigorFromWidget(widgetInfo)
@@ -1032,12 +1046,10 @@ function zSkyridingBar:UpdateAllFrameAppearance()
 end
 
 function zSkyridingBar:ToggleMoveMode()
-    if InCombatLockdown() then
-        zSkyridingBar.print("Cannot use move mode while in combat.")
-    end
     moveMode = not moveMode
 
     if InCombatLockdown() then
+        zSkyridingBar.print("Cannot use move mode while in combat.")
         moveMode = false
     end
 
@@ -1058,8 +1070,6 @@ function zSkyridingBar:ToggleMoveMode()
             speedAbilityFrame.moveBackground:Show()
         end
     else
-        zSkyridingBar.print("Move mode disabled")
-
         if speedBarFrame then
             hideMoveBackground(speedBarFrame)
             speedBarFrame:StopMovingOrSizing()
@@ -1127,14 +1137,14 @@ function zSkyridingBar:OnUnitAura(unitTarget)
 end
 
 function zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
+    if InCombatLockdown() then return end
     if unitTarget == "player" and powerType == "ALTERNATE" then
-        if not InCombatLockdown() then
-            self:UpdateChargeBars()
-        end
+        self:UpdateChargeBars()
     end
 end
 
 function zSkyridingBar:OnSpellcastSucceeded(event, unitTarget, castGUID, spellId)
+    if InCombatLockdown() then return end
     if unitTarget == "player" and spellId == ASCENT_SPELL_ID then
         ascentStart = GetTime()
     end
