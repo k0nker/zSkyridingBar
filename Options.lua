@@ -289,6 +289,25 @@ local options = {
             name = L["Position and Size"],
             inline = true,
             args = {
+                singleFrameMode = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Single Frame Mode"],
+                    desc = L["Move all frames together"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.singleFrameMode
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.singleFrameMode = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                framespacer1 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
                 frameStrata = {
                     order = nextOrder(),
                     type = "select",
@@ -361,6 +380,8 @@ local options = {
                         zSkyridingBar.db.profile.speedBarHeight = defaults.speedBarHeight
                         zSkyridingBar.db.profile.chargeBarWidth = defaults.chargeBarWidth
                         zSkyridingBar.db.profile.chargeBarHeight = defaults.chargeBarHeight
+                        zSkyridingBar.db.profile.masterMoveFrameX = defaults.masterMoveFrameX
+                        zSkyridingBar.db.profile.masterMoveFrameY = defaults.masterMoveFrameY
                         zSkyridingBar:RefreshConfig()
                         zSkyridingBar:UpdateFramePositions()
                         zSkyridingBar:UpdateFonts()

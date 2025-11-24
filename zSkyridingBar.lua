@@ -81,14 +81,16 @@ local defaults = {
         theme = "thick",
 
         -- Position settings
+        masterMoveFrameX = 0,
+        masterMoveFrameY = -160,
         speedBarX = 0,
-        speedBarY = -167,
+        speedBarY = 0,
         chargesBarX = 0,
-        chargesBarY = -15,
-        speedAbilityX = -160,
-        speedAbilityY = -176,
+        chargesBarY = 0,
+        speedAbilityX = -8,
+        speedAbilityY = -8,
         secondWindX = 0,
-        secondWindY = -216,
+        secondWindY = -32,
         frameScale = 1,
         frameStrata = "MEDIUM",
         singleFrameMode = false,
@@ -112,6 +114,7 @@ local defaults = {
         chargeBarNormalRechargeColor = { 0.53, 0.29, 0.2, 1 },
         chargeBarFastRechargeColor = { 0.25, 0.9, 0.6, 1 },
         chargeBarFullColor = { 0.2, 0.5, 0.8, 1 },
+        chargeBarBorderSize = 1,
 
         -- Speed indicator settings
         showSpeedIndicator = true,
@@ -130,7 +133,7 @@ local defaults = {
         whirlingSurgeTexture = getDefaultTexture(),
 
         -- Font settings
-        fontSize = 13,
+        fontSize = 12,
         fontFace = "Homespun",
         fontFlag = "OUTLINE",
         fontColor = { 1, 1, 1, 1 },
@@ -150,18 +153,18 @@ local THEMES = {
         chargeBarSpacing = 2,
         speedIndicatorHeight = 20,
         chargeBarTexture = "default",
-        borderSize = 2,
+        chargeBarBorderSize = 1,
         chargesBarX = 0,
         chargesBarY = -5,
     },
     thick = {
         name = "Thick",
         speedBarHeight = 28,
-        chargeBarHeight = 22,
+        chargeBarHeight = 20,
         chargeBarSpacing = 0,
-        speedIndicatorHeight = 28,
+        speedIndicatorHeight = 30,
         chargeBarTexture = "default",
-        borderSize = 0,
+        chargeBarBorderSize = 1,
         chargesBarX = 0,
         chargesBarY = 0,
     },
@@ -177,6 +180,8 @@ local framevars = {
     secondWindFrame = {
     },
     whirlingSurgeFrame = {
+    },
+    masterMoveFrame = {
     },
 }
 
@@ -195,6 +200,7 @@ local function applyTheme(themeName)
     profile.speedIndicatorHeight = theme.speedIndicatorHeight
     profile.chargesBarX = theme.chargesBarX
     profile.chargesBarY = theme.chargesBarY
+    profile.chargeBarBorderSize = theme.chargeBarBorderSize
 end
 
 -- Local variables
@@ -205,6 +211,7 @@ local isSlowSkyriding = true
 local hasSkyriding = false
 
 -- Frame references
+local masterMoveFrame = nil
 local speedBarFrame = nil
 local chargesBarFrame = nil
 local speedAbilityFrame = nil
@@ -355,7 +362,8 @@ local function createMoveableFrameHeader(frame, frameName)
     frame:SetScript("OnDragStart", function(self)
         if moveMode and not InCombatLockdown() then
             self:StartMoving()
-        else
+        end
+        if InCombatLockdown() then
             if zSkyridingBar.print then
                 zSkyridingBar.print("Cannot move frame while in combat. Retry after combat ends.")
             end
@@ -394,12 +402,14 @@ local function showMoveBackground(frame)
         frame.moveBackground:SetAllPoints(frame)
         frame.moveBackground:SetColorTexture(0, 0, 0, 0.5)
     end
+    frame:EnableMouse(true)
     frame.moveBackground:Show()
 end
 
 -- Helper: Hide move mode background
 local function hideMoveBackground(frame)
     if frame.moveBackground then
+        frame:EnableMouse(false)
         frame.moveBackground:Hide()
     end
 end
@@ -534,6 +544,10 @@ local function releaseAllFrames()
         secondWindFrame:Hide()
         secondWindFrame = nil
     end
+    if masterMoveFrame then
+        masterMoveFrame:Hide()
+        masterMoveFrame = nil
+    end
     -- Also clear references to bars and icons
     speedBar = nil
     speedText = nil
@@ -551,8 +565,8 @@ function zSkyridingBar:UpdateFramePositions()
     if speedBarFrame then
         speedBarFrame:ClearAllPoints()
         speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
-        speedBarFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
-        speedBarFrame:SetScale(self.db.profile.frameScale)
+        speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
+        speedBarFrame:SetScale(self.db.profile.frameScale*.65)
         speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if chargesBarFrame then
@@ -560,23 +574,30 @@ function zSkyridingBar:UpdateFramePositions()
         chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
         chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile
             .chargesBarY)
-        chargesBarFrame:SetScale(self.db.profile.frameScale)
+        chargesBarFrame:SetScale(self.db.profile.frameScale*.65)
         chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if speedAbilityFrame then
         speedAbilityFrame:ClearAllPoints()
         speedAbilityFrame:SetSize(40, 40)
-        speedAbilityFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.speedAbilityX,
+        speedAbilityFrame:SetPoint("TOPRIGHT", speedBarFrame, "TOPLEFT", self.db.profile.speedAbilityX,
             self.db.profile.speedAbilityY)
-        speedAbilityFrame:SetScale(self.db.profile.frameScale)
+        speedAbilityFrame:SetScale(self.db.profile.frameScale*.65)
         speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if secondWindFrame then
         secondWindFrame:ClearAllPoints()
         secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
-        secondWindFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
-        secondWindFrame:SetScale(self.db.profile.frameScale)
+        secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
+        secondWindFrame:SetScale(self.db.profile.frameScale*.65)
         secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
+    end
+    if masterMoveFrame then
+        masterMoveFrame:ClearAllPoints()
+        masterMoveFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.masterMoveFrameX,
+            self.db.profile.masterMoveFrameY)
+        masterMoveFrame:SetScale(self.db.profile.frameScale)
+        masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
 end
 
@@ -625,6 +646,7 @@ function zSkyridingBar:CreateAllFrames()
     self:CreateChargesBarFrame()
     self:CreateSpeedAbilityFrame()
     self:CreateSecondWindFrame()
+    self:CreateMasterMoveFrame()
     if InCombatLockdown() then
         zSkyridingBar.print("Cannot update UI while in combat. Retry after combat ends.")
         return
@@ -636,13 +658,26 @@ function zSkyridingBar:CreateAllFrames()
     end
 end
 
+function zSkyridingBar:CreateMasterMoveFrame()
+    masterMoveFrame = CreateFrame("Frame", "zSkyridingBarMasterMoveFrame", UIParent)
+    masterMoveFrame:SetSize(300, 200)
+    masterMoveFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.masterMoveFrameX, self.db.profile.masterMoveFrameY)
+    masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
+    masterMoveFrame:SetFrameLevel(5)
+    masterMoveFrame:SetScale(self.db.profile.frameScale)
+    -- make frame clickthrough
+    masterMoveFrame:EnableMouse(false)
+    masterMoveFrame:SetClampedToScreen(true)
+    createMoveableFrameHeader(masterMoveFrame, "masterMoveFrame")
+end
+
 function zSkyridingBar:CreateSpeedBarFrame()
-    speedBarFrame = CreateFrame("Frame", "zSkyridingBarSpeedBarFrame", UIParent)
+    speedBarFrame = CreateFrame("Frame", "zSkyridingBarSpeedBarFrame", masterMoveFrame)
     speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
-    speedBarFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
+    speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
     speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     speedBarFrame:SetFrameLevel(10)
-    speedBarFrame:SetScale(self.db.profile.frameScale)
+    speedBarFrame:SetScale(self.db.profile.frameScale*.65)
 
     -- Speed bar (status bar)
     speedBar = CreateFrame("StatusBar", "zSkyridingBarSpeedBar", speedBarFrame)
@@ -731,19 +766,19 @@ function zSkyridingBar:CreateSpeedBarFrame()
     createMoveableFrameHeader(speedBarFrame, "speedBar")
 
     -- Enable mouse for dragging
-    speedBarFrame:EnableMouse(true)
+    speedBarFrame:EnableMouse(false)
     speedBarFrame:SetClampedToScreen(true)
 
     speedBarFrame:Hide()
 end
 
 function zSkyridingBar:CreateChargesBarFrame()
-    chargesBarFrame = CreateFrame("Frame", "zSkyridingBarChargesBarFrame", UIParent)
+    chargesBarFrame = CreateFrame("Frame", "zSkyridingBarChargesBarFrame", masterMoveFrame)
     chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
     chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile.chargesBarY)
     chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     chargesBarFrame:SetFrameLevel(10)
-    chargesBarFrame:SetScale(self.db.profile.frameScale)
+    chargesBarFrame:SetScale(self.db.profile.frameScale*.65)
 
     chargeFrame = CreateFrame("Frame", "zSkyridingBarChargeFrame", chargesBarFrame)
     chargeFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
@@ -783,19 +818,19 @@ function zSkyridingBar:CreateChargesBarFrame()
 
         -- Borders for all themes
         for _, point in ipairs({
-            { "TOPLEFT",    "TOPRIGHT",    1, "horizontal" },
-            { "BOTTOMLEFT", "BOTTOMRIGHT", 1, "horizontal" },
-            { "TOPLEFT",    "BOTTOMLEFT",  1, "vertical" },
-            { "TOPRIGHT",   "BOTTOMRIGHT", 1, "vertical" },
+            { "TOPLEFT",    "TOPRIGHT",    10, "horizontal" },
+            { "BOTTOMLEFT", "BOTTOMRIGHT", 10, "horizontal" },
+            { "TOPLEFT",    "BOTTOMLEFT",  10, "vertical" },
+            { "TOPRIGHT",   "BOTTOMRIGHT", 10, "vertical" },
         }) do
             local line = bar:CreateTexture(nil, "OVERLAY")
             line:SetColorTexture(0, 0, 0, 1)
             line:SetPoint(point[1], bar, point[1], 0, 0)
             line:SetPoint(point[2], bar, point[2], 0, 0)
             if point[4] == "horizontal" then
-                line:SetHeight(1)
+                line:SetHeight(self.db.profile.chargeBarBorderSize or 0)
             else
-                line:SetWidth(1)
+                line:SetWidth(self.db.profile.chargeBarBorderSize or 0)
             end
         end
 
@@ -807,20 +842,20 @@ function zSkyridingBar:CreateChargesBarFrame()
     createMoveableFrameHeader(chargesBarFrame, "chargesBar")
 
     -- Enable mouse for dragging
-    chargesBarFrame:EnableMouse(true)
+    chargesBarFrame:EnableMouse(false)
     chargesBarFrame:SetClampedToScreen(true)
 
     chargesBarFrame:Hide()
 end
 
 function zSkyridingBar:CreateSpeedAbilityFrame()
-    speedAbilityFrame = CreateFrame("Frame", "zSkyridingBarSpeedAbilityFrame", UIParent)
+    speedAbilityFrame = CreateFrame("Frame", "zSkyridingBarSpeedAbilityFrame", masterMoveFrame)
     speedAbilityFrame:SetSize(40, 40)
     speedAbilityFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.speedAbilityX, self.db.profile
         .speedAbilityY)
     speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
     speedAbilityFrame:SetFrameLevel(10)
-    speedAbilityFrame:SetScale(self.db.profile.frameScale)
+    speedAbilityFrame:SetScale(self.db.profile.frameScale*.65)
 
     -- Icon for Static Charge
     staticChargeIcon = speedAbilityFrame:CreateTexture(nil, "ARTWORK")
@@ -881,19 +916,19 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     createMoveableFrameHeader(speedAbilityFrame, "staticCharge")
 
     -- Enable mouse for dragging
-    speedAbilityFrame:EnableMouse(true)
+    speedAbilityFrame:EnableMouse(false)
     speedAbilityFrame:SetClampedToScreen(true)
 
     speedAbilityFrame:Hide()
 end
 
 function zSkyridingBar:CreateSecondWindFrame()
-    secondWindFrame = CreateFrame("Frame", "zSkyridingBarSecondWindFrame", UIParent)
+    secondWindFrame = CreateFrame("Frame", "zSkyridingBarSecondWindFrame", masterMoveFrame)
     secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
     secondWindFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
     secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
     secondWindFrame:SetFrameLevel(10)
-    secondWindFrame:SetScale(self.db.profile.frameScale)
+    secondWindFrame:SetScale(self.db.profile.frameScale*.65)
 
     -- Second Wind bar (status bar for the single charge display)
     secondWindBar = CreateFrame("StatusBar", "zSkyridingBarSecondWindBar", secondWindFrame)
@@ -947,7 +982,7 @@ function zSkyridingBar:CreateSecondWindFrame()
     createMoveableFrameHeader(secondWindFrame, "secondWind")
 
     -- Enable mouse for dragging
-    secondWindFrame:EnableMouse(true)
+    secondWindFrame:EnableMouse(false)
     secondWindFrame:SetClampedToScreen(true)
 
     secondWindFrame:Hide()
@@ -1016,7 +1051,23 @@ function zSkyridingBar:UpdateChargesBarAppearance()
             bar.bg:SetTexture(chargeTexture)
             bar.bg:SetVertexColor(unpack(self.db.profile.chargeBarBackgroundColor))
         end
-
+        -- Update borders
+        local borderTextures = bar:GetRegions()
+        for _, texture in ipairs({borderTextures}) do
+            if texture and texture:GetObjectType() == "Texture" and texture:GetDrawLayer() == "OVERLAY" then
+                -- This is a border texture
+                local height = texture:GetHeight()
+                local width = texture:GetWidth()
+                if height == 1 or width == 1 then
+                    -- This is a border line
+                    if height == 1 then
+                        texture:SetHeight(self.db.profile.chargeBarBorderSize or 0)
+                    else
+                        texture:SetWidth(self.db.profile.chargeBarBorderSize or 0)
+                    end
+                end
+            end
+        end
         -- Update color based on current state
         local isFull = (i <= previousChargeCount)
         local isRecharging = (i == previousChargeCount + 1)
@@ -1060,14 +1111,18 @@ function zSkyridingBar:ToggleMoveMode()
         if chargesBarFrame then showMoveBackground(chargesBarFrame) end
         if speedAbilityFrame then showMoveBackground(speedAbilityFrame) end
         if secondWindFrame then showMoveBackground(secondWindFrame) end
+        if speedAbilityFrame then showMoveBackground(speedAbilityFrame) end
+        if self.db.profile.singleFrameMode then
+            if masterMoveFrame then showMoveBackground(masterMoveFrame) end
+        end
 
         if speedBarFrame then speedBarFrame:Show() end
         if chargesBarFrame then chargesBarFrame:Show() end
         if speedAbilityFrame then speedAbilityFrame:Show() end
         if secondWindFrame then secondWindFrame:Show() end
-        -- Always show speedAbilityFrame background in move mode, even if icon is hidden
-        if speedAbilityFrame and speedAbilityFrame.moveBackground then
-            speedAbilityFrame.moveBackground:Show()
+        if speedAbilityFrame then speedAbilityFrame:Show() end
+        if self.db.profile.singleFrameMode then
+            if masterMoveFrame then masterMoveFrame:Show() end
         end
     else
         if speedBarFrame then
@@ -1086,6 +1141,10 @@ function zSkyridingBar:ToggleMoveMode()
             hideMoveBackground(secondWindFrame)
             secondWindFrame:StopMovingOrSizing()
         end
+        if masterMoveFrame then
+            hideMoveBackground(masterMoveFrame)
+            masterMoveFrame:StopMovingOrSizing()
+        end
 
         -- Reshow based on current active state
         if active then
@@ -1095,11 +1154,13 @@ function zSkyridingBar:ToggleMoveMode()
             if chargesBarFrame then chargesBarFrame:Show() end
             if speedAbilityFrame then speedAbilityFrame:Show() end
             if secondWindFrame then secondWindFrame:Show() end
+            if masterMoveFrame then masterMoveFrame:Show() end
         else
             if speedBarFrame then speedBarFrame:Hide() end
             if chargesBarFrame then chargesBarFrame:Hide() end
             if speedAbilityFrame then speedAbilityFrame:Hide() end
             if secondWindFrame then secondWindFrame:Hide() end
+            if masterMoveFrame then masterMoveFrame:Hide() end
         end
     end
 end
