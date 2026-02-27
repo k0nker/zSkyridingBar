@@ -443,7 +443,10 @@ function zSkyridingBar:OnInitialize()
         end
     end)
 
-    self:CreateAllFrames()
+    C_Timer.After(3, function()
+            self:CreateAllFrames()
+    end)
+    --self:CreateAllFrames()
 
     self.db.RegisterCallback(self, "OnProfileChanged", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileCopied", "RefreshConfig")
@@ -611,6 +614,8 @@ function zSkyridingBar:RefreshConfig()
 end
 
 function zSkyridingBar:CreateAllFrames()
+    -- Pause for a few seconds, then continue
+
     applyTheme(self.db.profile.theme)
     releaseAllFrames()
     -- Register LEM callbacks once (guarded so they survive CreateAllFrames re-calls)
@@ -628,13 +633,10 @@ function zSkyridingBar:CreateAllFrames()
 
         -- Restore frames to their correct visibility when EditMode closes
         LEM:RegisterCallback('exit', function()
-            if not active then
-                if masterMoveFrame then masterMoveFrame:Hide() end
-                if speedBarFrame then speedBarFrame:Hide() end
-                if chargesBarFrame then chargesBarFrame:Hide() end
-                if speedAbilityFrame then speedAbilityFrame:Hide() end
-                if secondWindFrame then secondWindFrame:Hide() end
-            end
+            -- Use CheckSkyridingAvailability to correctly handle the case where the player
+            -- mounted up while Edit Mode was open (the normal PLAYER_CAN_GLIDE_CHANGED handler
+            -- is suppressed while Edit Mode is active, so active/hasSkyriding may be stale)
+            zSkyridingBar:CheckSkyridingAvailability()
         end)
 
         -- Apply per-layout scales whenever the active EditMode layout changes
@@ -693,9 +695,9 @@ function zSkyridingBar:CreateMasterMoveFrame()
         zSkyridingBar.db.profile.masterMoveFrameX = x
         zSkyridingBar.db.profile.masterMoveFrameY = y
     end, {
-        point = savedPoint,
-        x = self.db.profile.masterMoveFrameX,
-        y = self.db.profile.masterMoveFrameY,
+        point = defaults.profile.masterMoveFramePoint,
+        x = defaults.profile.masterMoveFrameX,
+        y = defaults.profile.masterMoveFrameY,
     })
 
     -- Add a Scale slider to the EditMode dialog for this frame
@@ -735,7 +737,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
             zSkyridingBar.db.profile.multiSpeedBarPoint = point
             zSkyridingBar.db.profile.multiSpeedBarX = x
             zSkyridingBar.db.profile.multiSpeedBarY = y
-        end, { point = pt, x = profile.multiSpeedBarX, y = profile.multiSpeedBarY })
+        end, { point = defaults.profile.multiSpeedBarPoint, x = defaults.profile.multiSpeedBarX, y = defaults.profile.multiSpeedBarY })
         local activeLayout = LEM:GetActiveLayoutName()
         speedBarFrame:SetScale((activeLayout and profile.multiSpeedBarScales[activeLayout]) or 1.0)
         LEM:AddFrameSettings(speedBarFrame, { {
@@ -860,7 +862,7 @@ function zSkyridingBar:CreateChargesBarFrame()
             zSkyridingBar.db.profile.multiChargesBarPoint = point
             zSkyridingBar.db.profile.multiChargesBarX = x
             zSkyridingBar.db.profile.multiChargesBarY = y
-        end, { point = pt, x = profile.multiChargesBarX, y = profile.multiChargesBarY })
+        end, { point = defaults.profile.multiChargesBarPoint, x = defaults.profile.multiChargesBarX, y = defaults.profile.multiChargesBarY })
         local activeLayout = LEM:GetActiveLayoutName()
         chargesBarFrame:SetScale((activeLayout and profile.multiChargesBarScales[activeLayout]) or 1.0)
         LEM:AddFrameSettings(chargesBarFrame, { {
@@ -959,7 +961,7 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
             zSkyridingBar.db.profile.multiSpeedAbilityPoint = point
             zSkyridingBar.db.profile.multiSpeedAbilityX = x
             zSkyridingBar.db.profile.multiSpeedAbilityY = y
-        end, { point = pt, x = profile.multiSpeedAbilityX, y = profile.multiSpeedAbilityY })
+        end, { point = defaults.profile.multiSpeedAbilityPoint, x = defaults.profile.multiSpeedAbilityX, y = defaults.profile.multiSpeedAbilityY })
         local activeLayout = LEM:GetActiveLayoutName()
         speedAbilityFrame:SetScale((activeLayout and profile.multiSpeedAbilityScales[activeLayout]) or 1.0)
         LEM:AddFrameSettings(speedAbilityFrame, { {
@@ -1055,7 +1057,7 @@ function zSkyridingBar:CreateSecondWindFrame()
             zSkyridingBar.db.profile.multiSecondWindPoint = point
             zSkyridingBar.db.profile.multiSecondWindX = x
             zSkyridingBar.db.profile.multiSecondWindY = y
-        end, { point = pt, x = profile.multiSecondWindX, y = profile.multiSecondWindY })
+        end, { point = defaults.profile.multiSecondWindPoint, x = defaults.profile.multiSecondWindX, y = defaults.profile.multiSecondWindY })
         local activeLayout = LEM:GetActiveLayoutName()
         secondWindFrame:SetScale((activeLayout and profile.multiSecondWindScales[activeLayout]) or 1.0)
         LEM:AddFrameSettings(secondWindFrame, { {
