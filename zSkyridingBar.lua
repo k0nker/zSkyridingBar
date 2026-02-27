@@ -8,6 +8,9 @@ local BuildVersion, BuildBuild, BuildDate, BuildInterface = GetBuildInfo()
 -- Get localization from AceLocale
 local L = LibStub("AceLocale-3.0"):GetLocale("zSkyridingBar")
 
+-- LibEditMode for in-game frame repositioning via EditMode
+local LEM = LibStub("LibEditMode")
+
 -- print function that accepts everything normal print would, like args and variables etc. I can  pass multiple args and concatenated strings
 function zSkyridingBar.print(...)
     local args = { ... }
@@ -84,6 +87,7 @@ local defaults = {
         theme = "thick",
 
         -- Position settings
+        masterMoveFramePoint = "CENTER",
         masterMoveFrameX = 0,
         masterMoveFrameY = -160,
         speedBarX = 0,
@@ -96,7 +100,6 @@ local defaults = {
         secondWindY = -32,
         frameScale = 1,
         frameStrata = "MEDIUM",
-        singleFrameMode = false,
 
         -- Speed bar settings
         speedBarWidth = 256,
@@ -214,7 +217,6 @@ local isSlowSkyriding = true
 local hasSkyriding = false
 
 -- Frame references
-local moveModeText = nil
 local masterMoveFrame = nil
 local speedBarFrame = nil
 local chargesBarFrame = nil
@@ -235,8 +237,6 @@ local whirlingSurgeIcon = nil
 -- State tracking
 local previousChargeCount = 0
 local chargesInitialized = false
-local moveMode = false
-local movingFrame = nil
 local secondWindStartTime = 0
 local whirlingSurgeStartTime = 0
 local speedBarAnimSpeed = 5
@@ -357,62 +357,6 @@ local function AnimateStatusBar(bar, targetValue, smoothFactor)
     end
 end
 
-local function createMoveableFrameHeader(frame, frameName)
-    frame:SetMovable(true)
-    frame:SetUserPlaced(true)
-    frame:RegisterForDrag("LeftButton")
-
-    frame:SetScript("OnDragStart", function(self)
-        if InCombatLockdown() then
-            return
-        end
-        if moveMode then
-            self:StartMoving()
-        end
-    end)
-
-    frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-
-        local parentFrame = frame:GetParent()
-        local masterX, masterY = parentFrame:GetCenter()
-        local selfX, selfY = self:GetCenter()
-        local xOfs = selfX - masterX
-        local yOfs = selfY - masterY
-
-        local dbKeyX = frameName .. "X"
-        local dbKeyY = frameName .. "Y"
-
-        if zSkyridingBar.db.profile[dbKeyX] then
-            zSkyridingBar.db.profile[dbKeyX] = xOfs
-            zSkyridingBar.db.profile[dbKeyY] = yOfs
-        end
-        zSkyridingBar:UpdateFramePositions()
-
-        -- Re-anchor to masterMoveFrame with new offset
-        --self:ClearAllPoints()
-        --self:SetPoint("CENTER", masterMoveFrame, "CENTER", xOfs, yOfs)
-    end)
-end
-
--- Helper: Show move mode background
-local function showMoveBackground(frame)
-    if not frame.moveBackground then
-        frame.moveBackground = frame:CreateTexture(nil, "BACKGROUND")
-        frame.moveBackground:SetAllPoints(frame)
-        frame.moveBackground:SetColorTexture(0, 0, 0, 0.5)
-    end
-    frame:EnableMouse(true)
-    frame.moveBackground:Show()
-end
-
--- Helper: Hide move mode background
-local function hideMoveBackground(frame)
-    if frame.moveBackground then
-        frame:EnableMouse(false)
-        frame.moveBackground:Hide()
-    end
-end
 
 -- Addon lifecycle
 function zSkyridingBar:OnInitialize()
@@ -477,10 +421,6 @@ function zSkyridingBar:OnInitialize()
             if CompatCheck then
                 local widgetInfo = select(1, ...)
                 zSkyridingBar:UpdateVigorFromWidget(widgetInfo)
-            end
-        elseif event == "PLAYER_REGEN_DISABLED" then
-            if moveMode then
-                zSkyridingBar:ToggleMoveMode()
             end
         end
     end)
@@ -566,7 +506,6 @@ function zSkyridingBar:UpdateFramePositions()
         speedBarFrame:ClearAllPoints()
         speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
         speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
-        speedBarFrame:SetScale(self.db.profile.frameScale * .65)
         speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if chargesBarFrame then
@@ -574,7 +513,6 @@ function zSkyridingBar:UpdateFramePositions()
         chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
         chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile
             .chargesBarY)
-        chargesBarFrame:SetScale(self.db.profile.frameScale * .65)
         chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if speedAbilityFrame then
@@ -582,21 +520,17 @@ function zSkyridingBar:UpdateFramePositions()
         speedAbilityFrame:SetSize(40, 40)
         speedAbilityFrame:SetPoint("TOPRIGHT", speedBarFrame, "TOPLEFT", self.db.profile.speedAbilityX,
             self.db.profile.speedAbilityY)
-        speedAbilityFrame:SetScale(self.db.profile.frameScale * .65)
         speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if secondWindFrame then
         secondWindFrame:ClearAllPoints()
         secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
         secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
-        secondWindFrame:SetScale(self.db.profile.frameScale * .65)
         secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
     if masterMoveFrame then
-        masterMoveFrame:ClearAllPoints()
-        masterMoveFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.masterMoveFrameX,
-            self.db.profile.masterMoveFrameY)
-        --masterMoveFrame:SetScale(self.db.profile.frameScale)
+        -- Scale applies to masterMoveFrame; child frames inherit it via parentage
+        masterMoveFrame:SetScale(self.db.profile.frameScale)
         masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
 end
@@ -642,11 +576,12 @@ end
 function zSkyridingBar:CreateAllFrames()
     applyTheme(self.db.profile.theme)
     releaseAllFrames()
+    -- Create master frame first so child frames parent correctly
+    self:CreateMasterMoveFrame()
     self:CreateSpeedBarFrame()
     self:CreateChargesBarFrame()
     self:CreateSpeedAbilityFrame()
     self:CreateSecondWindFrame()
-    self:CreateMasterMoveFrame()
     if InCombatLockdown() then
         zSkyridingBar.print(L["Combat lockdown active. UI updates paused."])
         return
@@ -661,14 +596,29 @@ end
 function zSkyridingBar:CreateMasterMoveFrame()
     masterMoveFrame = CreateFrame("Frame", "zSkyridingBarMasterMoveFrame", UIParent)
     masterMoveFrame:SetSize(300, 200)
-    masterMoveFrame:SetPoint("CENTER", UIParent, "CENTER", self.db.profile.masterMoveFrameX, self.db.profile.masterMoveFrameY)
+
+    local savedPoint = self.db.profile.masterMoveFramePoint or "CENTER"
+    masterMoveFrame:SetPoint(savedPoint, UIParent, savedPoint,
+        self.db.profile.masterMoveFrameX,
+        self.db.profile.masterMoveFrameY)
+
     masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
     masterMoveFrame:SetFrameLevel(5)
-    --masterMoveFrame:SetScale(self.db.profile.frameScale)
-    -- make frame clickthrough
+    masterMoveFrame:SetScale(self.db.profile.frameScale)
     masterMoveFrame:EnableMouse(false)
     masterMoveFrame:SetClampedToScreen(true)
-    createMoveableFrameHeader(masterMoveFrame, "masterMoveFrame")
+
+    -- Register with Blizzard EditMode so users can reposition via the in-game UI
+    masterMoveFrame.editModeName = "zSkyridingBar"
+    LEM:AddFrame(masterMoveFrame, function(frame, layoutName, point, x, y)
+        zSkyridingBar.db.profile.masterMoveFramePoint = point
+        zSkyridingBar.db.profile.masterMoveFrameX = x
+        zSkyridingBar.db.profile.masterMoveFrameY = y
+    end, {
+        point = savedPoint,
+        x = self.db.profile.masterMoveFrameX,
+        y = self.db.profile.masterMoveFrameY,
+    })
 end
 
 function zSkyridingBar:CreateSpeedBarFrame()
@@ -677,7 +627,6 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
     speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     speedBarFrame:SetFrameLevel(10)
-    speedBarFrame:SetScale(self.db.profile.frameScale * .65)
 
     -- Speed bar (status bar)
     speedBar = CreateFrame("StatusBar", "zSkyridingBarSpeedBar", speedBarFrame)
@@ -763,12 +712,6 @@ function zSkyridingBar:CreateSpeedBarFrame()
         speedBar.speedIndicator = speedIndicator
     end
 
-    createMoveableFrameHeader(speedBarFrame, "speedBar")
-
-    -- Enable mouse for dragging
-    speedBarFrame:EnableMouse(false)
-    speedBarFrame:SetClampedToScreen(true)
-
     speedBarFrame:Hide()
 end
 
@@ -778,7 +721,6 @@ function zSkyridingBar:CreateChargesBarFrame()
     chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile.chargesBarY)
     chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
     chargesBarFrame:SetFrameLevel(10)
-    chargesBarFrame:SetScale(self.db.profile.frameScale * .65)
 
     chargeFrame = CreateFrame("Frame", "zSkyridingBarChargeFrame", chargesBarFrame)
     chargeFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
@@ -839,12 +781,6 @@ function zSkyridingBar:CreateChargesBarFrame()
         bar:Hide()
     end
 
-    createMoveableFrameHeader(chargesBarFrame, "chargesBar")
-
-    -- Enable mouse for dragging
-    chargesBarFrame:EnableMouse(false)
-    chargesBarFrame:SetClampedToScreen(true)
-
     chargesBarFrame:Hide()
 end
 
@@ -855,7 +791,6 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
         .speedAbilityY)
     speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
     speedAbilityFrame:SetFrameLevel(10)
-    speedAbilityFrame:SetScale(self.db.profile.frameScale * .65)
 
     -- Icon for Static Charge
     staticChargeIcon = speedAbilityFrame:CreateTexture(nil, "ARTWORK")
@@ -913,12 +848,6 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     staticChargeText:SetText("")
     staticChargeText:Hide()
 
-    createMoveableFrameHeader(speedAbilityFrame, "staticCharge")
-
-    -- Enable mouse for dragging
-    speedAbilityFrame:EnableMouse(false)
-    speedAbilityFrame:SetClampedToScreen(true)
-
     speedAbilityFrame:Hide()
 end
 
@@ -928,7 +857,6 @@ function zSkyridingBar:CreateSecondWindFrame()
     secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
     secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
     secondWindFrame:SetFrameLevel(10)
-    secondWindFrame:SetScale(self.db.profile.frameScale * .65)
 
     -- Second Wind bar (status bar for the single charge display)
     secondWindBar = CreateFrame("StatusBar", "zSkyridingBarSecondWindBar", secondWindFrame)
@@ -978,12 +906,6 @@ function zSkyridingBar:CreateSecondWindFrame()
     secondWindBar.currentValue = 0
     secondWindBar.targetValue = 0
     secondWindBar.smoothTimer = nil
-
-    createMoveableFrameHeader(secondWindFrame, "secondWind")
-
-    -- Enable mouse for dragging
-    secondWindFrame:EnableMouse(false)
-    secondWindFrame:SetClampedToScreen(true)
 
     secondWindFrame:Hide()
 end
@@ -1094,88 +1016,6 @@ function zSkyridingBar:UpdateAllFrameAppearance()
     self:UpdateSpeedBarAppearance()
     self:UpdateChargesBarAppearance()
     self:UpdateSecondWindBarAppearance()
-end
-
-function zSkyridingBar:ToggleMoveMode()
-    moveMode = not moveMode
-
-    if InCombatLockdown() then
-        zSkyridingBar.print(L["Combat lockdown active. UI updates paused."])
-        moveMode = false
-    end
-
-    if moveMode then
-        zSkyridingBar.print(L["Move mode enabled - Drag frames to reposition."])
-        -- Create a text frame in the middle of the screen that says "zSkyridingBar Move Mode Active"
-        if not moveModeText then
-            moveModeText = UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-            moveModeText:SetText(L["zSkyridingBar Move Mode Active"])
-            moveModeText:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-        end
-        moveModeText:Show()
-
-        if speedBarFrame then showMoveBackground(speedBarFrame) end
-        if chargesBarFrame then showMoveBackground(chargesBarFrame) end
-        if speedAbilityFrame then showMoveBackground(speedAbilityFrame) end
-        if secondWindFrame then showMoveBackground(secondWindFrame) end
-        if speedAbilityFrame then showMoveBackground(speedAbilityFrame) end
-        if self.db.profile.singleFrameMode then
-            if masterMoveFrame then showMoveBackground(masterMoveFrame) end
-        end
-
-        if speedBarFrame then speedBarFrame:Show() end
-        if chargesBarFrame then chargesBarFrame:Show() end
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        if secondWindFrame then secondWindFrame:Show() end
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        if self.db.profile.singleFrameMode then
-            if masterMoveFrame then masterMoveFrame:Show() end
-        end
-    else
-        zSkyridingBar.print(L["Move mode disabled."])
-
-        -- remove the moveModeText
-        if moveModeText then
-            moveModeText:Hide()
-        end
-        if speedBarFrame then
-            hideMoveBackground(speedBarFrame)
-            speedBarFrame:StopMovingOrSizing()
-        end
-        if chargesBarFrame then
-            hideMoveBackground(chargesBarFrame)
-            chargesBarFrame:StopMovingOrSizing()
-        end
-        if speedAbilityFrame then
-            hideMoveBackground(speedAbilityFrame)
-            speedAbilityFrame:StopMovingOrSizing()
-        end
-        if secondWindFrame then
-            hideMoveBackground(secondWindFrame)
-            secondWindFrame:StopMovingOrSizing()
-        end
-        if masterMoveFrame then
-            hideMoveBackground(masterMoveFrame)
-            masterMoveFrame:StopMovingOrSizing()
-        end
-
-        -- Reshow based on current active state
-        if active then
-            -- Let UpdateTracking handle the actual visibility based on skyriding state
-            -- Just ensure frames are shown if we're actively tracking
-            if speedBarFrame then speedBarFrame:Show() end
-            if chargesBarFrame then chargesBarFrame:Show() end
-            if speedAbilityFrame then speedAbilityFrame:Show() end
-            if secondWindFrame then secondWindFrame:Show() end
-            if masterMoveFrame then masterMoveFrame:Show() end
-        else
-            if speedBarFrame then speedBarFrame:Hide() end
-            if chargesBarFrame then chargesBarFrame:Hide() end
-            if speedAbilityFrame then speedAbilityFrame:Hide() end
-            if secondWindFrame then secondWindFrame:Hide() end
-            if masterMoveFrame then masterMoveFrame:Hide() end
-        end
-    end
 end
 
 -- Event handlers
@@ -1815,9 +1655,7 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
     end
 
     -- If neither, hide the frame and overlay
-    if not moveMode then
-        if speedAbilityFrame then speedAbilityFrame:Hide() end
-    end
+    if speedAbilityFrame then speedAbilityFrame:Hide() end
     if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
         speedAbilityFrame.whirlingSurgeReverseFill:Hide()
     end
@@ -1882,6 +1720,12 @@ function zSkyridingBar:UpdateSecondWind()
     end
 end
 
+-- Opens EditMode after closing the options panel
+function zSkyridingBar:OpenEditMode()
+    LibStub("AceConfigDialog-3.0"):Close("zSkyridingBar")
+    ShowUIPanel(EditModeManagerFrame)
+end
+
 -- Chat commands
 SLASH_ZSKYRIDINGBAR1 = "/zskyridingbar"
 SLASH_ZSKYRIDINGBAR2 = "/zskyriding"
@@ -1902,11 +1746,11 @@ SlashCmdList["ZSKYRIDINGBAR"] = function(msg)
             zSkyridingBar.print(L["Options not ready yet."])
         end
     elseif msg == "move" then
-        zSkyridingBar:ToggleMoveMode()
+        zSkyridingBar:OpenEditMode()
     else
         zSkyridingBar.print(L["Commands:"])
         zSkyridingBar.print("  /zsb - " .. L["Open options"])
-        zSkyridingBar.print("  /zsb move - " .. L["Toggle move mode"])
+        zSkyridingBar.print("  /zsb move - " .. L["Open EditMode to reposition"])
         zSkyridingBar.print("  /zsb toggle - " .. L["Toggle addon"])
     end
 end

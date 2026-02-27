@@ -116,6 +116,8 @@ L["Options not ready yet."] = "Opzioni non ancora pronte."
 L["Commands:"] = "Comandi:"
 L["Open options"] = "Apri opzioni"
 L["Toggle move mode"] = "Attiva/disattiva modalità spostamento"
+L["Open EditMode to reposition the addon"] = "Apri EditMode per riposizionare l'addon"
+L["Open EditMode to reposition"] = "Apri EditMode per riposizionare"
 L["Toggle addon"] = "Attiva/disattiva addon"
 L["Second Wind Charges"] = "Cariche secondo vento"
 

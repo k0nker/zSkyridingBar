@@ -116,6 +116,8 @@ L["Options not ready yet."] = "选项尚未准备好。"
 L["Commands:"] = "命令："
 L["Open options"] = "打开选项"
 L["Toggle move mode"] = "切换移动模式"
+L["Open EditMode to reposition the addon"] = "打开编辑模式以重新定位插件"
+L["Open EditMode to reposition"] = "打开编辑模式以重定位"
 L["Toggle addon"] = "切换插件"
 L["Second Wind Charges"] = "二段风充能"
 
