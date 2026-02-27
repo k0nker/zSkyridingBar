@@ -27,7 +27,9 @@ local WHIRLING_SURGE_SPELL_ID = 361584 -- Whirling Surge ability
 local LIGHTNING_RUSH_SPELL_ID = 418592 -- Lightning Rush ability
 local SLOW_SKYRIDING_RATIO = 705 / 830
 local ASCENT_DURATION = 3.5
-local TICK_RATE = 1 / 20 -- 20 FPS updates
+local TICK_RATE = 1 / 15 -- How often game state is polled (gliding, show/hide, text, colors, abilities)
+local BAR_TICK_RATE = 1 / 20 -- How often status bar values are pushed (lower = more animation breathing room)
+local BAR_MULTIPLIER = 0.01
 
 -- Second Wind constants
 local SECOND_WIND_MAX_CHARGES = 3
@@ -230,6 +232,7 @@ end
 -- Local variables
 local active = false
 local updateHandle = nil
+local barUpdateHandle = nil
 local ascentStart = 0
 local isSlowSkyriding = true
 local hasSkyriding = false
@@ -257,9 +260,7 @@ local previousChargeCount = 0
 local chargesInitialized = false
 local secondWindStartTime = 0
 local whirlingSurgeStartTime = 0
-local speedBarAnimSpeed = 5
-local chargeBarAnimSpeed = 10
-local vigorAnimSpeed = 5
+
 
 -- Localized functions
 local GetTime = GetTime
@@ -332,48 +333,6 @@ local function updateChargeBarColor(bar, isFull, isRecharging)
     bar:SetStatusBarColor(unpack(color))
 end
 
-local function AnimateStatusBar(bar, targetValue, smoothFactor)
-    if not bar or not hasSkyriding then return end
-
-    -- Initialize current value if needed
-    if not bar.currentValue then
-        bar.currentValue = bar:GetValue()
-    end
-
-    bar.targetValue = targetValue
-
-    if not bar.animating then
-        bar.animating = true
-
-        bar:SetScript("OnUpdate", function(self, elapsed)
-            if not self.targetValue then
-                self:SetScript("OnUpdate", nil)
-                self.animating = false
-                return
-            end
-
-            -- Exponential smoothing (lerp)
-            -- Lower smoothFactor = smoother but slower
-            -- Higher smoothFactor = faster but more jittery
-            local factor = math.min(1, (smoothFactor or 8) * elapsed)
-            local diff = self.targetValue - self.currentValue
-
-            if math.abs(diff) < 0.01 then
-                self.currentValue = self.targetValue
-                self:SetValue(self.targetValue)
-                self:SetScript("OnUpdate", nil)
-                self.animating = false
-                return
-            end
-
-            self.currentValue = self.currentValue + (diff * factor)
-            self:SetValue(self.currentValue)
-        end)
-    else
-        -- Animation already running, just update target
-        -- The OnUpdate script will smoothly transition to new target
-    end
-end
 
 
 -- Addon lifecycle
@@ -769,7 +728,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
         "Interface\\TargetingFrame\\UI-StatusBar"
     speedBar:SetStatusBarTexture(speedTexture)
     speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarNormalColor))
-    speedBar:SetMinMaxValues(20, 100)
+    speedBar:SetMinMaxValues(20 * BAR_MULTIPLIER, 100 * BAR_MULTIPLIER)
     speedBar:SetValue(0)
     speedBar:SetClipsChildren(true)
 
@@ -907,12 +866,8 @@ function zSkyridingBar:CreateChargesBarFrame()
         local chargeTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.chargeBarTexture) or
             "Interface\\TargetingFrame\\UI-StatusBar"
         bar:SetStatusBarTexture(chargeTexture)
-        bar:SetMinMaxValues(0, 100)
+        bar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
         bar:SetValue(0)
-
-        bar.currentValue = 0
-        bar.targetValue = 0
-        bar.smoothTimer = nil
 
         -- Background
         local bg = bar:CreateTexture(nil, "BACKGROUND")
@@ -1089,7 +1044,7 @@ function zSkyridingBar:CreateSecondWindFrame()
         "Interface\\TargetingFrame\\UI-StatusBar"
     secondWindBar:SetStatusBarTexture(secondWindTexture)
     secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindNoChargeColor))
-    secondWindBar:SetMinMaxValues(0, 100)
+    secondWindBar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
     secondWindBar:SetValue(0)
 
     -- Borders for all themes
@@ -1124,10 +1079,6 @@ function zSkyridingBar:CreateSecondWindFrame()
     secondWindText:SetPoint("CENTER", secondWindBar, "CENTER", 0, 0)
     secondWindText:SetTextColor(unpack(self.db.profile.fontColor))
     secondWindText:SetText("0/3")
-
-    secondWindBar.currentValue = 0
-    secondWindBar.targetValue = 0
-    secondWindBar.smoothTimer = nil
 
     secondWindFrame:Hide()
 end
@@ -1314,6 +1265,7 @@ function zSkyridingBar:StartTracking()
     if not updateHandle then
         active = true
         updateHandle = self:ScheduleRepeatingTimer("UpdateTracking", TICK_RATE)
+        barUpdateHandle = self:ScheduleRepeatingTimer("UpdateBarValues", BAR_TICK_RATE)
 
         if speedBarFrame then speedBarFrame:Show() end
         if speedBar then speedBar:Show() end
@@ -1337,6 +1289,10 @@ function zSkyridingBar:StopTracking()
     if updateHandle then
         self:CancelTimer(updateHandle)
         updateHandle = nil
+    end
+    if barUpdateHandle then
+        self:CancelTimer(barUpdateHandle)
+        barUpdateHandle = nil
     end
 
     previousChargeCount = 0
@@ -1402,8 +1358,6 @@ function zSkyridingBar:UpdateTracking()
         adjustedSpeed = adjustedSpeed / SLOW_SKYRIDING_RATIO
     end
 
-    AnimateStatusBar(speedBar, math.min(100, math.max(20, adjustedSpeed)), speedBarAnimSpeed)
-
     if speedText and self.db.profile.speedShow then
         local speedTextFormat, speedTextFactor = "", 1
         if self.db.profile.speedUnits == 1 then
@@ -1420,11 +1374,25 @@ function zSkyridingBar:UpdateTracking()
     self:UpdatespeedBarNormalColors(forwardSpeed)
 
     if not InCombatLockdown() then
-        self:UpdateChargeBars()
         self:UpdateStaticChargeAndWhirlingSurge()
-        self:UpdateSecondWind()
-        -- self:UpdateWhirlingSurge() -- unified in UpdateStaticChargeAndWhirlingSurge
     end
+end
+
+function zSkyridingBar:UpdateBarValues()
+    if not active or not speedBar or InCombatLockdown() then return end
+
+    local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
+    if not isGliding and not isFlying then return end
+
+    local adjustedSpeed = forwardSpeed
+    if isSlowSkyriding then
+        adjustedSpeed = adjustedSpeed / SLOW_SKYRIDING_RATIO
+    end
+
+    speedBar:SetValue(math.min(100, math.max(20, adjustedSpeed)) * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
+
+    self:UpdateChargeBars()
+    self:UpdateSecondWind()
 end
 
 function zSkyridingBar:UpdatespeedBarNormalColors(currentSpeed)
@@ -1472,12 +1440,12 @@ if CompatCheck then
                 bar:Show()
 
                 -- Set up the bar range (0-100 for percentage-like display)
-                bar:SetMinMaxValues(0, 100)
+                bar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
 
                 if widgetData.numFullFrames >= i then
                     -- Full charge - instantly fill to 100%
                     updateChargeBarColor(bar, true, false)
-                    AnimateStatusBar(bar, 100, vigorAnimSpeed)
+                    bar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 elseif widgetData.numFullFrames + 1 == i then
                     -- Currently regenerating charge - show smooth progress
                     local progress = 0
@@ -1485,11 +1453,11 @@ if CompatCheck then
                         progress = ((widgetData.fillValue - widgetData.fillMin) / (widgetData.fillMax - widgetData.fillMin)) * 100
                     end
                     updateChargeBarColor(bar, false, true)
-                    AnimateStatusBar(bar, math.max(0, math.min(100, progress)), vigorAnimSpeed)
+                    bar:SetValue(math.max(0, math.min(100, progress)) * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 else
                     -- Empty charge
                     updateChargeBarColor(bar, false, false)
-                    AnimateStatusBar(bar, 0, vigorAnimSpeed)
+                    bar:SetValue(0, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 end
             end
         end
@@ -1522,35 +1490,22 @@ function zSkyridingBar:UpdateChargeBars()
             local bar = chargeFrame.bars[i]
             if bar then
                 bar:Show()
-                bar:SetMinMaxValues(0, 100)
+                bar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
 
                 if i <= charges then
                     updateChargeBarColor(bar, true, false)
-                    if bar.targetValue ~= 100 then
-                        bar:SetValue(100)
-                        bar.currentValue = 100
-                        bar.targetValue = 100
-                    end
+                    bar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                     bar:GetStatusBarTexture():SetAlpha(1)
                 elseif i == charges + 1 and start and duration and duration > 0 then
                     local elapsed = GetTime() - start
                     local progress = math.min(100, (elapsed / duration) * 100)
                     updateChargeBarColor(bar, false, true)
-                    -- Only animate if progress changed by more than 0.5%
-                    if not bar.lastProgress or math.abs(bar.lastProgress - progress) > 0.5 then
-                        AnimateStatusBar(bar, progress, chargeBarAnimSpeed)
-                        bar.lastProgress = progress
-                    end
+                    bar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                     bar:GetStatusBarTexture():SetAlpha(1)
                 else
                     updateChargeBarColor(bar, false, false)
-                    if bar.targetValue ~= 0 then
-                        bar:SetValue(0)
-                        bar.currentValue = 0
-                        bar.targetValue = 0
-                    end
+                    bar:SetValue(0, Enum.StatusBarInterpolation.ExponentialEaseOut)
                     bar:GetStatusBarTexture():SetAlpha(0)
-                    bar.lastProgress = nil
                 end
             end
         end
@@ -1899,14 +1854,14 @@ function zSkyridingBar:UpdateSecondWind()
         if secondWindFrame then secondWindFrame:Show() end
 
         if charges >= maxCharges then
-            secondWindBar:SetValue(100)
+            secondWindBar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
             secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindThreeChargeColor))
         elseif charges > 0 and charges < maxCharges then
             -- Has some charges, show progress of next recharge
             if start and duration and duration > 0 then
                 local elapsed = GetTime() - start
                 local progress = math.min(100, (elapsed / duration) * 100)
-                secondWindBar:SetValue(progress)
+                secondWindBar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 if charges == 0 then
                     secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindOneChargeColor))
                     secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
@@ -1918,7 +1873,7 @@ function zSkyridingBar:UpdateSecondWind()
                     secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindTwoChargeColor))
                 end
             else
-                secondWindBar:SetValue(100)
+                secondWindBar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindThreeChargeColor))
                 secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindTwoChargeColor))
             end
@@ -1927,11 +1882,11 @@ function zSkyridingBar:UpdateSecondWind()
             if start and duration and duration > 0 then
                 local elapsed = GetTime() - start
                 local progress = math.min(100, (elapsed / duration) * 100)
-                secondWindBar:SetValue(progress)
+                secondWindBar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindOneChargeColor))
                 secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
             else
-                secondWindBar:SetValue(0)
+                secondWindBar:SetValue(0, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindNoChargeColor))
                 secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
             end
