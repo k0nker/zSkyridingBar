@@ -86,7 +86,6 @@ local defaults = {
         speedShow = true,
         speedUnits = 2, -- 1 = yd/s, 2 = move%
         hideDefaultSpeedUI = true,
-        theme = "thick",
 
         -- Position settings
         masterMoveFramePoint = "CENTER",
@@ -122,8 +121,12 @@ local defaults = {
         frameStrata = "MEDIUM",
 
         -- Speed bar settings
+        hideSpeedBar = false,
+        hideChargeBar = false,
+        hideSecondWindBar = false,
+        hideSpeedAbility = false,
         speedBarWidth = 256,
-        speedBarHeight = 18,
+        speedBarHeight = 28,
         speedBarTexture = getDefaultTexture(),
         speedBarBackgroundColor = { 0, 0, 0, 0.4 },
         speedBarNormalColor = { 0.749, 0.439, 0.173, 1 },
@@ -132,9 +135,9 @@ local defaults = {
 
         -- Charge bar settings
         chargeBarWidth = 256,
-        chargeBarHeight = 12,
-        chargeBarSpacing = 2,
-        speedIndicatorHeight = 18,
+        chargeBarHeight = 20,
+        chargeBarSpacing = 0,
+        speedIndicatorHeight = 30,
         chargeBarTexture = getDefaultTexture(),
         chargeBarBackgroundColor = { 0, 0, 0, 0.4 },
         chargeBarNormalRechargeColor = { 0.53, 0.29, 0.2, 1 },
@@ -337,7 +340,8 @@ end
 
 -- Addon lifecycle
 function zSkyridingBar:OnInitialize()
-    self.db = LibStub("AceDB-3.0"):New("zSkyridingBarDB", defaults, true)
+    self.db = LibStub("AceDB-3.0"):New("zSkyridingBarDB", defaults, "Default")
+    self:SeedBuiltinProfiles()
 
     -- Event frame for event handling
     local eventFrame = CreateFrame("Frame")
@@ -410,6 +414,107 @@ function zSkyridingBar:OnInitialize()
     self.db.RegisterCallback(self, "OnProfileChanged", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileCopied", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileReset", "RefreshConfig")
+end
+
+-- Seed built-in "Classic" and "Thick" profiles on first load if they don't yet exist.
+
+-- Preset height/spacing values for each built-in profile.
+-- Widths are NOT included — those are always user-adjustable for user profiles,
+-- and locked (disabled) for Classic/Thick.
+local BUILTIN_PRESETS = {
+    Classic = {
+        speedBarHeight = 18,
+        chargeBarHeight = 12,
+        chargeBarSpacing = 2,
+        speedIndicatorHeight = 20,
+        chargesBarX = 0,
+        chargesBarY = -5,
+        chargeBarBorderSize = 1,
+    },
+    Thick = {
+        speedBarHeight = 28,
+        chargeBarHeight = 20,
+        chargeBarSpacing = 0,
+        speedIndicatorHeight = 30,
+        chargesBarX = 0,
+        chargesBarY = 0,
+        chargeBarBorderSize = 1,
+    },
+}
+
+function zSkyridingBar:SeedBuiltinProfiles()
+    local currentProfile = self.db:GetCurrentProfile()
+    self._seeding = true
+
+    local CLASSIC_SETTINGS = BUILTIN_PRESETS.Classic
+    local THICK_SETTINGS   = BUILTIN_PRESETS.Thick
+
+    if not self.db.profiles["Classic"] then
+        self.db:SetProfile("Classic")
+        for k, v in pairs(CLASSIC_SETTINGS) do
+            self.db.profile[k] = v
+        end
+    end
+
+    if not self.db.profiles["Thick"] then
+        self.db:SetProfile("Thick")
+        for k, v in pairs(THICK_SETTINGS) do
+            self.db.profile[k] = v
+        end
+    end
+
+    if self.db:GetCurrentProfile() ~= currentProfile then
+        self.db:SetProfile(currentProfile)
+    end
+    self._seeding = false
+end
+
+-- Reset the current profile to its canonical defaults.
+-- Built-in profiles (Classic / Thick) restore their preset height/spacing values
+-- on top of the AceDB defaults, so they always return to the correct layout.
+-- User profiles reset to the AceDB defaults (Thick values).
+function zSkyridingBar:ResetCurrentProfile()
+    self.db:ResetProfile()  -- resets everything to AceDB defaults (Thick values)
+    local preset = BUILTIN_PRESETS[self.db:GetCurrentProfile()]
+    if preset then
+        for k, v in pairs(preset) do
+            self.db.profile[k] = v
+        end
+    end
+    self:RefreshConfig()
+    zSkyridingBar.print(L["Reset all settings to default."])
+end
+
+-- Create a new profile (switches to it immediately).
+function zSkyridingBar:CreateNewProfile(name)
+    if not name or name == "" then
+        zSkyridingBar.print(L["Profile name cannot be empty"])
+        return false
+    end
+    if self.db.profiles[name] then
+        self.db:SetProfile(name)
+        zSkyridingBar.print(L["Profile already exists, switched to it"] .. ": " .. name)
+        self:RefreshConfig()
+        return false
+    end
+    self.db:SetProfile(name)
+    zSkyridingBar.print(L["Profile created"] .. ": " .. name)
+    self:RefreshConfig()
+    return true
+end
+
+-- Delete the currently active profile and fall back to "Default".
+-- Classic and Thick are protected and cannot be deleted.
+function zSkyridingBar:DeleteCurrentProfile()
+    local current = self.db:GetCurrentProfile()
+    if current == "Classic" or current == "Thick" then
+        zSkyridingBar.print(L["Cannot delete Classic or Thick profiles"])
+        return
+    end
+    -- Switch away first (triggers RefreshConfig via OnProfileChanged)
+    self.db:SetProfile("Default")
+    self.db:DeleteProfile(current, true)
+    zSkyridingBar.print(L["Profile deleted"] .. ": " .. current)
 end
 
 function zSkyridingBar:OnPlayerLogin()
@@ -494,7 +599,7 @@ function zSkyridingBar:UpdateFramePositions()
         if chargesBarFrame then
             chargesBarFrame:ClearAllPoints()
             chargesBarFrame:SetSize(profile.chargeBarWidth, profile.chargeBarHeight)
-            chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", profile.chargesBarX, profile.chargesBarY)
+            chargesBarFrame:SetPoint("CENTER", speedBarFrame, "CENTER", profile.chargesBarX, profile.chargesBarY - (profile.speedBarHeight/2) - (profile.chargeBarHeight/2) )
             chargesBarFrame:SetFrameStrata(profile.frameStrata)
         end
         if speedAbilityFrame then
@@ -555,7 +660,7 @@ function zSkyridingBar:UpdateFonts()
 end
 
 function zSkyridingBar:RefreshConfig()
-    applyTheme(self.db.profile.theme)
+    if self._seeding then return end
     -- Update frame positions and appearance without destroying
     --self:UpdateFramePositions()
     if InCombatLockdown() then
@@ -573,9 +678,6 @@ function zSkyridingBar:RefreshConfig()
 end
 
 function zSkyridingBar:CreateAllFrames()
-    -- Pause for a few seconds, then continue
-
-    applyTheme(self.db.profile.theme)
     releaseAllFrames()
     -- Register LEM callbacks once (guarded so they survive CreateAllFrames re-calls)
     if not zSkyridingBar.lemCallbacksRegistered then
@@ -633,7 +735,9 @@ end
 
 function zSkyridingBar:CreateMasterMoveFrame()
     masterMoveFrame = CreateFrame("Frame", nil, UIParent)
-    masterMoveFrame:SetSize(300, 200)
+    local profile = self.db.profile
+    local masterWidth = math.max(profile.speedBarWidth, profile.chargeBarWidth, profile.secondWindBarWidth) + 50
+    masterMoveFrame:SetSize(masterWidth, 200)
 
     local savedPoint = self.db.profile.masterMoveFramePoint or "CENTER"
     masterMoveFrame:SetPoint(savedPoint, UIParent, savedPoint,
@@ -795,7 +899,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
     if self.db.profile.showSpeedIndicator then
         local speedIndicator = speedBar:CreateTexture(nil, "OVERLAY", nil, -1)
         speedIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
-        speedIndicator:SetSize(2, self.db.profile.speedIndicatorHeight)
+        speedIndicator:SetSize(2, self.db.profile.speedBarHeight + 4)
         speedIndicator:SetColorTexture(unpack(self.db.profile.speedIndicatorColor))
 
         local indicatorPos = (60 - 20) / (100 - 20)
@@ -811,7 +915,7 @@ function zSkyridingBar:CreateChargesBarFrame()
     local profile = self.db.profile
     if profile.singleFrameMode then
         chargesBarFrame = CreateFrame("Frame", nil, masterMoveFrame)
-        chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", profile.chargesBarX, profile.chargesBarY)
+        chargesBarFrame:SetPoint("CENTER", speedBarFrame, "CENTER", profile.chargesBarX, profile.chargesBarY - (profile.speedBarHeight/2) - (profile.chargeBarHeight/2) )
     else
         chargesBarFrame = CreateFrame("Frame", nil, UIParent)
         local pt = profile.multiChargesBarPoint or "CENTER"
@@ -1087,6 +1191,9 @@ end
 function zSkyridingBar:UpdateSpeedBarAppearance()
     if not speedBar then return end
 
+    if speedBarFrame then
+        speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
+    end
     speedBar:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
     local speedTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.speedBarTexture) or
         "Interface\\TargetingFrame\\UI-StatusBar"
@@ -1103,11 +1210,11 @@ function zSkyridingBar:UpdateSpeedBarAppearance()
         if not speedBar.speedIndicator then
             local speedIndicator = speedBar:CreateTexture(nil, "OVERLAY", nil, -1)
             speedIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
-            speedIndicator:SetSize(2, self.db.profile.speedIndicatorHeight)
+            speedIndicator:SetSize(2, self.db.profile.speedBarHeight)
             speedIndicator:SetColorTexture(unpack(self.db.profile.speedIndicatorColor))
             speedBar.speedIndicator = speedIndicator
         end
-        speedBar.speedIndicator:SetSize(2, self.db.profile.speedIndicatorHeight)
+        speedBar.speedIndicator:SetSize(2, self.db.profile.speedBarHeight)
         speedBar.speedIndicator:SetColorTexture(unpack(self.db.profile.speedIndicatorColor))
         local indicatorPos = (60 - 20) / (100 - 20)
         speedBar.speedIndicator:SetPoint("LEFT", speedBar, "LEFT", indicatorPos * self.db.profile.speedBarWidth, 0)
@@ -1119,6 +1226,14 @@ end
 
 function zSkyridingBar:UpdateChargesBarAppearance()
     if not chargeFrame or not chargeFrame.bars then return end
+
+    if chargesBarFrame then
+        chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
+    end
+
+    if chargeFrame then
+        chargeFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
+    end
 
     -- Recalculate bar widths and spacing
     local numBars = #chargeFrame.bars
@@ -1173,6 +1288,9 @@ end
 function zSkyridingBar:UpdateSecondWindBarAppearance()
     if not secondWindBar then return end
 
+    if secondWindFrame then
+        secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
+    end
     secondWindBar:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
     local secondWindTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.speedBarTexture) or
         "Interface\\TargetingFrame\\UI-StatusBar"
@@ -1189,6 +1307,24 @@ function zSkyridingBar:UpdateAllFrameAppearance()
     self:UpdateSpeedBarAppearance()
     self:UpdateChargesBarAppearance()
     self:UpdateSecondWindBarAppearance()
+    -- Respect hide flags while tracking is active
+    if active then
+        if speedBarFrame then
+            if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else speedBarFrame:Show() end
+        end
+        if chargesBarFrame then
+            if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
+        end
+        if secondWindFrame then
+            if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
+        end
+    end
+    -- Keep master frame wide enough to encompass the widest bar
+    if self.db.profile.singleFrameMode and masterMoveFrame then
+        local profile = self.db.profile
+        local masterWidth = math.max(profile.speedBarWidth, profile.chargeBarWidth, profile.secondWindBarWidth) + 50
+        masterMoveFrame:SetSize(masterWidth, masterMoveFrame:GetHeight())
+    end
 end
 
 -- Event handlers
@@ -1267,12 +1403,22 @@ function zSkyridingBar:StartTracking()
         updateHandle = self:ScheduleRepeatingTimer("UpdateTracking", TICK_RATE)
         barUpdateHandle = self:ScheduleRepeatingTimer("UpdateBarValues", BAR_TICK_RATE)
 
-        if speedBarFrame then speedBarFrame:Show() end
+        if speedBarFrame then
+            if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else speedBarFrame:Show() end
+        end
         if speedBar then speedBar:Show() end
-        if chargesBarFrame then chargesBarFrame:Show() end
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        if secondWindFrame then secondWindFrame:Show() end
-        if secondWindBar then secondWindBar:Show() end
+        if chargesBarFrame then
+            if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
+        end
+        if speedAbilityFrame then
+            if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() else speedAbilityFrame:Show() end
+        end
+        if secondWindFrame then
+            if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
+        end
+        if secondWindBar then
+            if self.db.profile.hideSecondWindBar then secondWindBar:Hide() else secondWindBar:Show() end
+        end
 
         self:UpdateChargeBars()
         self:UpdateStaticChargeAndWhirlingSurge()
@@ -1346,11 +1492,21 @@ function zSkyridingBar:UpdateTracking()
         return
     else
         if speedBar then speedBar:Show() end
-        if speedBarFrame then speedBarFrame:Show() end
-        if chargesBarFrame then chargesBarFrame:Show() end
-        if chargeFrame then chargeFrame:Show() end
-        if secondWindFrame then secondWindFrame:Show() end
-        if secondWindBar then secondWindBar:Show() end
+        if speedBarFrame then
+            if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else speedBarFrame:Show() end
+        end
+        if chargesBarFrame then
+            if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
+        end
+        if chargeFrame then
+            if self.db.profile.hideChargeBar then chargeFrame:Hide() else chargeFrame:Show() end
+        end
+        if secondWindFrame then
+            if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
+        end
+        if secondWindBar then
+            if self.db.profile.hideSecondWindBar then secondWindBar:Hide() else secondWindBar:Show() end
+        end
     end
 
     local adjustedSpeed = forwardSpeed
@@ -1523,6 +1679,7 @@ end
 function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
     if InCombatLockdown() then return end
     if not speedAbilityFrame or InCombatLockdown() then return end
+    if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() return end
 
     local isGliding, isFlying = C_PlayerInfo.GetGlidingInfo()
     if not isGliding and not isFlying then

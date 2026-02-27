@@ -16,6 +16,12 @@ local function resetOrder()
     orderCounter = 0
 end
 
+-- True when the active profile is one of the locked built-in presets.
+local function isBuiltinProfile()
+    local cur = zSkyridingBar.db:GetCurrentProfile()
+    return cur == "Classic" or cur == "Thick"
+end
+
 
 -- Options table
 local options = {
@@ -61,9 +67,7 @@ local options = {
             name = L["Reset All"],
             desc = L["Reset all settings to default values"],
             func = function()
-                zSkyridingBar.db:ResetProfile()
-                zSkyridingBar:RefreshConfig()
-                zSkyridingBar.print(L["Reset all settings to default."])
+                zSkyridingBar:ResetCurrentProfile()
             end,
             width = 0.8,
         },
@@ -75,22 +79,74 @@ local options = {
             name = L["General"],
             inline = true,
             args = {
-                theme = {
+                profilesHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Profile"],
+                },
+                activeProfile = {
                     order = nextOrder(),
                     type = "select",
-                    name = L["Theme"],
-                    desc = L["Choose UI theme (Classic or Thick)"],
-                    values = {
-                        classic = L["Classic"],
-                        thick = L["Thick"],
-                    },
-                    get = function(info)
-                        return zSkyridingBar.db.profile.theme or "classic"
+                    name = L["Active Profile"],
+                    desc = L["Switch between saved setting profiles"],
+                    values = function()
+                        -- Always show Classic and Thick even before they are seeded
+                        local profiles = { Classic = "Classic", Thick = "Thick" }
+                        for name, _ in pairs(zSkyridingBar.db.profiles) do
+                            profiles[name] = name
+                        end
+                        return profiles
                     end,
-                    set = function(info, value)
-                        zSkyridingBar.db.profile.theme = value
+                    get = function()
+                        return zSkyridingBar.db:GetCurrentProfile()
+                    end,
+                    set = function(_, value)
+                        zSkyridingBar.db:SetProfile(value)
                         zSkyridingBar:RefreshConfig()
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
                     end,
+                    width = "double",
+                },
+                newProfile = {
+                    order = nextOrder(),
+                    type = "input",
+                    name = L["New Profile"],
+                    desc = L["Type a name and press Enter to create a new profile"],
+                    get = function() return "" end,
+                    set = function(_, value)
+                        if not value or value == "" then return end
+                        zSkyridingBar:CreateNewProfile(value)
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                deleteProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Delete Profile"],
+                    desc = L["Delete the current profile (cannot delete Classic or Thick)"],
+                    disabled = function()
+                        local cur = zSkyridingBar.db:GetCurrentProfile()
+                        return cur == "Classic" or cur == "Thick"
+                    end,
+                    confirm = function()
+                        return L["Are you sure you want to delete the profile: "] ..
+                            "'" .. zSkyridingBar.db:GetCurrentProfile() .. "'?"
+                    end,
+                    func = function()
+                        zSkyridingBar:DeleteCurrentProfile()
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                profileSpacer = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                generalHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["General Settings"],
                 },
                 chargeRefreshSound = {
                     order = nextOrder(),
@@ -285,7 +341,12 @@ local options = {
             name = L["Position and Size"],
             inline = true,
             args = {
-                framespacer1 = {
+                frameHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Frame Settings"],
+                },
+                framespacer01 = {
                     order = nextOrder(),
                     type = "description",
                     name = "",
@@ -318,9 +379,13 @@ local options = {
                         zSkyridingBar.db.profile.singleFrameMode = value
                         zSkyridingBar:CreateAllFrames()
                     end,
+                },
+                framespacer02 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
                     width = "full",
                 },
-
                 moveFrame = {
                     order = nextOrder(),
                     type = "execute",
@@ -328,6 +393,266 @@ local options = {
                     desc = L["Open EditMode to reposition the addon"],
                     func = function()
                         zSkyridingBar:OpenEditMode()
+                    end,
+                },
+                sizeSpacer01 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                barHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Bar Settings"],
+                },
+                speedBarWidth = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Speed Bar Width"],
+                    desc = L["Set the width of the speed bar"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.speedBarWidth
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.speedBarWidth = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                speedBarHeight = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Speed Bar Height"],
+                    desc = L["Set the height of the speed bar"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.speedBarHeight
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.speedBarHeight = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer02 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                resetSpeedBarSize = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Reset Speed Bar Size"],
+                    desc = L["Reset speed bar size to default"],
+                    disabled = isBuiltinProfile,
+                    func = function()
+                        zSkyridingBar.db.profile.speedBarWidth = zSkyridingBar.db.defaults.profile.speedBarWidth
+                        zSkyridingBar.db.profile.speedBarHeight = zSkyridingBar.db.defaults.profile.speedBarHeight
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                hideSpeedBar = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Hide Speed Bar"],
+                    desc = L["Hide the speed bar"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.hideSpeedBar
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.hideSpeedBar = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer03 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                chargeBarWidth = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Charge Bar Width"],
+                    desc = L["Set the width of the charge bars"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.chargeBarWidth
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.chargeBarWidth = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                chargeBarHeight = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Charge Bar Height"],
+                    desc = L["Set the height of the charge bars"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.chargeBarHeight
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.chargeBarHeight = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer04 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                chargeBarSpacing = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Charge Bar Spacing"],
+                    desc = L["Set the spacing between charge bars"],
+                    min = 0,
+                    max = 200,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.chargeBarSpacing
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.chargeBarSpacing = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer05 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                resetChargeBarSize = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Reset Charge Bar Size"],
+                    desc = L["Reset charge bar size to default"],
+                    disabled = isBuiltinProfile,
+                    func = function()
+                        zSkyridingBar.db.profile.chargeBarWidth = zSkyridingBar.db.defaults.profile.chargeBarWidth
+                        zSkyridingBar.db.profile.chargeBarHeight = zSkyridingBar.db.defaults.profile.chargeBarHeight
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                hideChargeBar = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Hide Charge Bars"],
+                    desc = L["Hide the charge bars"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.hideChargeBar
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.hideChargeBar = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer06 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                secondWindBarWidth = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Second Wind Bar Width"],
+                    desc = L["Set the width of the second wind bar"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.secondWindBarWidth
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.secondWindBarWidth = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                secondWindBarHeight = {
+                    order = nextOrder(),
+                    type = "range",
+                    name = L["Second Wind Bar Height"],
+                    desc = L["Set the height of the second wind bar"],
+                    min = 10,
+                    max = 800,
+                    step = 1,
+                    disabled = isBuiltinProfile,
+                    get = function(info)
+                        return zSkyridingBar.db.profile.secondWindBarHeight
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.secondWindBarHeight = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer07 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                resetSecondWindBarSize = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Reset Second Wind Bar Size"],
+                    desc = L["Reset second wind bar size to default"],
+                    disabled = isBuiltinProfile,
+                    func = function()
+                        zSkyridingBar.db.profile.secondWindBarWidth = zSkyridingBar.db.defaults.profile.secondWindBarWidth
+                        zSkyridingBar.db.profile.secondWindBarHeight = zSkyridingBar.db.defaults.profile.secondWindBarHeight
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                hideSecondWindBar = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Hide Second Wind Bar"],
+                    desc = L["Hide the second wind bar"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.hideSecondWindBar
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.hideSecondWindBar = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+                sizeSpacer08 = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                hideSpeedAbility = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Hide Speed Ability"],
+                    desc = L["Hide the speed ability"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.hideSpeedAbility
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.hideSpeedAbility = value
+                        zSkyridingBar:RefreshConfig()
                     end,
                 },
             },
@@ -339,6 +664,11 @@ local options = {
             name = L["Colors"],
             inline = true,
             args = {
+                themeHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Color and Texture Settings"],
+                },
                 speedBarTexture = {
                     order = nextOrder(),
                     type = "select",
