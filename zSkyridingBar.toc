@@ -1,8 +1,8 @@
-## Interface: 110205, 110207, 120000
+## Interface: 120001
 ## Title: zSkyridingBar
 ## Notes: Skyriding bar for tracking speed and charges
 ## Author: k0nker
-## Version: 2025.1209.01
+## Version: 2026.0226.01
 ## SavedVariables: zSkyridingBarDB
 ## IconTexture: Interface\AddOns\zSkyridingBar\Assets\zSkyridingBar.tga
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3, LibSharedMedia-3.0
