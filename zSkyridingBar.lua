@@ -834,7 +834,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
 
     -- Speed indicator
     if self.db.profile.showSpeedIndicator then
-        local speedIndicator = speedBar:CreateTexture(nil, "OVERLAY")
+        local speedIndicator = speedBar:CreateTexture(nil, "ARTWORK")
         speedIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
         speedIndicator:SetSize(2, self.db.profile.speedIndicatorHeight)
         speedIndicator:SetColorTexture(unpack(self.db.profile.speedIndicatorColor))
@@ -1150,7 +1150,7 @@ function zSkyridingBar:UpdateSpeedBarAppearance()
     -- Update speed indicator if enabled
     if self.db.profile.showSpeedIndicator then
         if not speedBar.speedIndicator then
-            local speedIndicator = speedBar:CreateTexture(nil, "OVERLAY")
+            local speedIndicator = speedBar:CreateTexture(nil, "ARTWORK")
             speedIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
             speedIndicator:SetSize(2, self.db.profile.speedIndicatorHeight)
             speedIndicator:SetColorTexture(unpack(self.db.profile.speedIndicatorColor))
