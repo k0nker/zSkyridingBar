@@ -549,6 +549,7 @@ local options = {
                     func = function()
                         zSkyridingBar.db.profile.chargeBarWidth = zSkyridingBar.db.defaults.profile.chargeBarWidth
                         zSkyridingBar.db.profile.chargeBarHeight = zSkyridingBar.db.defaults.profile.chargeBarHeight
+                        zSkyridingBar.db.profile.chargeBarSpacing = zSkyridingBar.db.defaults.profile.chargeBarSpacing
                         zSkyridingBar:RefreshConfig()
                     end,
                 },
