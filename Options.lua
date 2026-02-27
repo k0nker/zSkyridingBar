@@ -315,60 +315,6 @@ local options = {
                         zSkyridingBar:OpenEditMode()
                     end,
                 },
-
-                spacer2 = {
-                    order = nextOrder(),
-                    type = "description",
-                    name = "",
-                    width = "full",
-                },
-
-                scale = {
-                    order = nextOrder(),
-                    type = "range",
-                    name = L["Scale"],
-                    desc = L["Set the scale of the addon"],
-                    min = 0.5,
-                    max = 3.0,
-                    step = 0.1,
-                    get = function(info)
-                        return zSkyridingBar.db.profile.frameScale or 1
-                    end,
-                    set = function(info, value)
-                        zSkyridingBar.db.profile.frameScale = value
-                        zSkyridingBar:RefreshConfig()
-                        zSkyridingBar:UpdateFramePositions()
-                    end,
-                    isPercent = true,
-                },
-
-                resetPosition = {
-                    order = nextOrder(),
-                    type = "execute",
-                    name = L["Reset Position"],
-                    desc = L["Reset position and size settings to defaults"],
-                    func = function()
-                        local defaults = zSkyridingBar.db.defaults.profile
-                        zSkyridingBar.db.profile.speedBarX = defaults.speedBarX
-                        zSkyridingBar.db.profile.speedBarY = defaults.speedBarY
-                        zSkyridingBar.db.profile.chargesBarX = defaults.chargesBarX
-                        zSkyridingBar.db.profile.chargesBarY = defaults.chargesBarY
-                        zSkyridingBar.db.profile.speedAbilityX = defaults.speedAbilityX
-                        zSkyridingBar.db.profile.speedAbilityY = defaults.speedAbilityY
-                        zSkyridingBar.db.profile.secondWindX = defaults.secondWindX
-                        zSkyridingBar.db.profile.secondWindY = defaults.secondWindY
-                        zSkyridingBar.db.profile.frameScale = defaults.frameScale
-                        zSkyridingBar.db.profile.frameStrata = defaults.frameStrata
-                        zSkyridingBar.db.profile.speedBarWidth = defaults.speedBarWidth
-                        zSkyridingBar.db.profile.speedBarHeight = defaults.speedBarHeight
-                        zSkyridingBar.db.profile.chargeBarWidth = defaults.chargeBarWidth
-                        zSkyridingBar.db.profile.chargeBarHeight = defaults.chargeBarHeight
-                        zSkyridingBar:RefreshConfig()
-                        zSkyridingBar:UpdateFramePositions()
-                        zSkyridingBar:UpdateFonts()
-                        zSkyridingBar.print(L["Reset position and size to defaults."])
-                    end,
-                },
             },
         },
 

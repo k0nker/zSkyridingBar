@@ -90,6 +90,7 @@ local defaults = {
         masterMoveFramePoint = "CENTER",
         masterMoveFrameX = 0,
         masterMoveFrameY = -160,
+        masterMoveFrameScales = {},
         speedBarX = 0,
         speedBarY = 0,
         chargesBarX = 0,
@@ -98,7 +99,6 @@ local defaults = {
         speedAbilityY = -4,
         secondWindX = 0,
         secondWindY = -32,
-        frameScale = 1,
         frameStrata = "MEDIUM",
 
         -- Speed bar settings
@@ -530,7 +530,8 @@ function zSkyridingBar:UpdateFramePositions()
     end
     if masterMoveFrame then
         -- Scale applies to masterMoveFrame; child frames inherit it via parentage
-        masterMoveFrame:SetScale(self.db.profile.frameScale)
+        local activeLayout = LEM:GetActiveLayoutName()
+        masterMoveFrame:SetScale((activeLayout and self.db.profile.masterMoveFrameScales[activeLayout]) or 1.0)
         masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
     end
 end
@@ -604,7 +605,8 @@ function zSkyridingBar:CreateMasterMoveFrame()
 
     masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
     masterMoveFrame:SetFrameLevel(5)
-    masterMoveFrame:SetScale(self.db.profile.frameScale)
+    local activeLayout = LEM:GetActiveLayoutName()
+    masterMoveFrame:SetScale((activeLayout and self.db.profile.masterMoveFrameScales[activeLayout]) or 1.0)
     masterMoveFrame:EnableMouse(false)
     masterMoveFrame:SetClampedToScreen(true)
 
@@ -619,6 +621,37 @@ function zSkyridingBar:CreateMasterMoveFrame()
         x = self.db.profile.masterMoveFrameX,
         y = self.db.profile.masterMoveFrameY,
     })
+
+    -- Add a Scale slider to the EditMode dialog for this frame
+    LEM:AddFrameSettings(masterMoveFrame, {
+        {
+            kind = LEM.SettingType.Slider,
+            name = L["Scale"],
+            default = 1.0,
+            minValue = 0.5,
+            maxValue = 3.0,
+            valueStep = 0.05,
+            get = function(layoutName)
+                return zSkyridingBar.db.profile.masterMoveFrameScales[layoutName] or 1.0
+            end,
+            set = function(layoutName, value)
+                zSkyridingBar.db.profile.masterMoveFrameScales[layoutName] = value
+                if masterMoveFrame then
+                    masterMoveFrame:SetScale(value)
+                end
+            end,
+        }
+    })
+
+    -- Apply the correct scale whenever the active EditMode layout changes
+    if not zSkyridingBar.lemLayoutCallbackRegistered then
+        zSkyridingBar.lemLayoutCallbackRegistered = true
+        LEM:RegisterCallback('layout', function(layoutName)
+            if masterMoveFrame then
+                masterMoveFrame:SetScale(zSkyridingBar.db.profile.masterMoveFrameScales[layoutName] or 1.0)
+            end
+        end)
+    end
 end
 
 function zSkyridingBar:CreateSpeedBarFrame()
@@ -639,6 +672,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarNormalColor))
     speedBar:SetMinMaxValues(20, 100)
     speedBar:SetValue(0)
+    speedBar:SetClipsChildren(true)
 
     -- Background
     local speedBarBG = speedBar:CreateTexture(nil, "BACKGROUND")
