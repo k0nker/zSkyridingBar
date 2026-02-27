@@ -306,6 +306,21 @@ local options = {
                     },
                 },
 
+                singleFrameMode = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Single Frame Mode"],
+                    desc = "Group all frames under one master frame in EditMode. Disable for independent per-frame positioning.",
+                    get = function(info)
+                        return zSkyridingBar.db.profile.singleFrameMode
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.singleFrameMode = value
+                        zSkyridingBar:CreateAllFrames()
+                    end,
+                    width = "full",
+                },
+
                 moveFrame = {
                     order = nextOrder(),
                     type = "execute",

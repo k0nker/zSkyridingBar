@@ -91,6 +91,7 @@ local defaults = {
         masterMoveFrameX = 0,
         masterMoveFrameY = -160,
         masterMoveFrameScales = {},
+        singleFrameMode = true,
         speedBarX = 0,
         speedBarY = 0,
         chargesBarX = 0,
@@ -99,6 +100,23 @@ local defaults = {
         speedAbilityY = -4,
         secondWindX = 0,
         secondWindY = -32,
+        -- Multi-frame mode: each frame anchored to UIParent independently
+        multiSpeedBarPoint = "CENTER",
+        multiSpeedBarX = 0,
+        multiSpeedBarY = -150,
+        multiChargesBarPoint = "CENTER",
+        multiChargesBarX = 0,
+        multiChargesBarY = -180,
+        multiSpeedAbilityPoint = "CENTER",
+        multiSpeedAbilityX = -148,
+        multiSpeedAbilityY = -150,
+        multiSecondWindPoint = "CENTER",
+        multiSecondWindX = 0,
+        multiSecondWindY = -210,
+        multiSpeedBarScales = {},
+        multiChargesBarScales = {},
+        multiSpeedAbilityScales = {},
+        multiSecondWindScales = {},
         frameStrata = "MEDIUM",
 
         -- Speed bar settings
@@ -501,38 +519,56 @@ local function releaseAllFrames()
 end
 
 function zSkyridingBar:UpdateFramePositions()
-    -- Update frame positions and sizes without destroying them
-    if speedBarFrame then
-        speedBarFrame:ClearAllPoints()
-        speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
-        speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
-        speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
-    end
-    if chargesBarFrame then
-        chargesBarFrame:ClearAllPoints()
-        chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
-        chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile
-            .chargesBarY)
-        chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
-    end
-    if speedAbilityFrame then
-        speedAbilityFrame:ClearAllPoints()
-        speedAbilityFrame:SetSize(40, 40)
-        speedAbilityFrame:SetPoint("TOPRIGHT", speedBarFrame, "TOPLEFT", self.db.profile.speedAbilityX,
-            self.db.profile.speedAbilityY)
-        speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
-    end
-    if secondWindFrame then
-        secondWindFrame:ClearAllPoints()
-        secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
-        secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
-        secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
-    end
-    if masterMoveFrame then
-        -- Scale applies to masterMoveFrame; child frames inherit it via parentage
-        local activeLayout = LEM:GetActiveLayoutName()
-        masterMoveFrame:SetScale((activeLayout and self.db.profile.masterMoveFrameScales[activeLayout]) or 1.0)
-        masterMoveFrame:SetFrameStrata(self.db.profile.frameStrata)
+    local profile = self.db.profile
+    local activeLayout = LEM:GetActiveLayoutName()
+    if profile.singleFrameMode then
+        -- Single Frame Mode: reposition child frames relative to masterMoveFrame
+        if speedBarFrame then
+            speedBarFrame:ClearAllPoints()
+            speedBarFrame:SetSize(profile.speedBarWidth, profile.speedBarHeight)
+            speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", profile.speedBarX, profile.speedBarY)
+            speedBarFrame:SetFrameStrata(profile.frameStrata)
+        end
+        if chargesBarFrame then
+            chargesBarFrame:ClearAllPoints()
+            chargesBarFrame:SetSize(profile.chargeBarWidth, profile.chargeBarHeight)
+            chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", profile.chargesBarX, profile.chargesBarY)
+            chargesBarFrame:SetFrameStrata(profile.frameStrata)
+        end
+        if speedAbilityFrame then
+            speedAbilityFrame:ClearAllPoints()
+            speedAbilityFrame:SetSize(40, 40)
+            speedAbilityFrame:SetPoint("TOPRIGHT", speedBarFrame, "TOPLEFT", profile.speedAbilityX, profile.speedAbilityY)
+            speedAbilityFrame:SetFrameStrata(profile.frameStrata)
+        end
+        if secondWindFrame then
+            secondWindFrame:ClearAllPoints()
+            secondWindFrame:SetSize(profile.secondWindBarWidth, profile.secondWindBarHeight)
+            secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", profile.secondWindX, profile.secondWindY)
+            secondWindFrame:SetFrameStrata(profile.frameStrata)
+        end
+        if masterMoveFrame then
+            masterMoveFrame:SetScale((activeLayout and profile.masterMoveFrameScales[activeLayout]) or 1.0)
+            masterMoveFrame:SetFrameStrata(profile.frameStrata)
+        end
+    else
+        -- Multi-frame Mode: LEM owns positions; only update strata and per-frame scale
+        if speedBarFrame then
+            speedBarFrame:SetFrameStrata(profile.frameStrata)
+            speedBarFrame:SetScale((activeLayout and profile.multiSpeedBarScales[activeLayout]) or 1.0)
+        end
+        if chargesBarFrame then
+            chargesBarFrame:SetFrameStrata(profile.frameStrata)
+            chargesBarFrame:SetScale((activeLayout and profile.multiChargesBarScales[activeLayout]) or 1.0)
+        end
+        if speedAbilityFrame then
+            speedAbilityFrame:SetFrameStrata(profile.frameStrata)
+            speedAbilityFrame:SetScale((activeLayout and profile.multiSpeedAbilityScales[activeLayout]) or 1.0)
+        end
+        if secondWindFrame then
+            secondWindFrame:SetFrameStrata(profile.frameStrata)
+            secondWindFrame:SetScale((activeLayout and profile.multiSecondWindScales[activeLayout]) or 1.0)
+        end
     end
 end
 
@@ -577,8 +613,48 @@ end
 function zSkyridingBar:CreateAllFrames()
     applyTheme(self.db.profile.theme)
     releaseAllFrames()
-    -- Create master frame first so child frames parent correctly
-    self:CreateMasterMoveFrame()
+    -- Register LEM callbacks once (guarded so they survive CreateAllFrames re-calls)
+    if not zSkyridingBar.lemCallbacksRegistered then
+        zSkyridingBar.lemCallbacksRegistered = true
+
+        -- Show all frames while in EditMode so they can be repositioned even when not skyriding
+        LEM:RegisterCallback('enter', function()
+            if masterMoveFrame then masterMoveFrame:Show() end
+            if speedBarFrame then speedBarFrame:Show() end
+            if chargesBarFrame then chargesBarFrame:Show() end
+            if speedAbilityFrame then speedAbilityFrame:Show() end
+            if secondWindFrame then secondWindFrame:Show() end
+        end)
+
+        -- Restore frames to their correct visibility when EditMode closes
+        LEM:RegisterCallback('exit', function()
+            if not active then
+                if masterMoveFrame then masterMoveFrame:Hide() end
+                if speedBarFrame then speedBarFrame:Hide() end
+                if chargesBarFrame then chargesBarFrame:Hide() end
+                if speedAbilityFrame then speedAbilityFrame:Hide() end
+                if secondWindFrame then secondWindFrame:Hide() end
+            end
+        end)
+
+        -- Apply per-layout scales whenever the active EditMode layout changes
+        LEM:RegisterCallback('layout', function(layoutName)
+            if zSkyridingBar.db.profile.singleFrameMode then
+                if masterMoveFrame then
+                    masterMoveFrame:SetScale(zSkyridingBar.db.profile.masterMoveFrameScales[layoutName] or 1.0)
+                end
+            else
+                if speedBarFrame then speedBarFrame:SetScale(zSkyridingBar.db.profile.multiSpeedBarScales[layoutName] or 1.0) end
+                if chargesBarFrame then chargesBarFrame:SetScale(zSkyridingBar.db.profile.multiChargesBarScales[layoutName] or 1.0) end
+                if speedAbilityFrame then speedAbilityFrame:SetScale(zSkyridingBar.db.profile.multiSpeedAbilityScales[layoutName] or 1.0) end
+                if secondWindFrame then secondWindFrame:SetScale(zSkyridingBar.db.profile.multiSecondWindScales[layoutName] or 1.0) end
+            end
+        end)
+    end
+    if self.db.profile.singleFrameMode then
+        -- Single Frame Mode: all sub-frames parented under one master frame
+        self:CreateMasterMoveFrame()
+    end
     self:CreateSpeedBarFrame()
     self:CreateChargesBarFrame()
     self:CreateSpeedAbilityFrame()
@@ -595,7 +671,7 @@ function zSkyridingBar:CreateAllFrames()
 end
 
 function zSkyridingBar:CreateMasterMoveFrame()
-    masterMoveFrame = CreateFrame("Frame", "zSkyridingBarMasterMoveFrame", UIParent)
+    masterMoveFrame = CreateFrame("Frame", nil, UIParent)
     masterMoveFrame:SetSize(300, 200)
 
     local savedPoint = self.db.profile.masterMoveFramePoint or "CENTER"
@@ -643,26 +719,47 @@ function zSkyridingBar:CreateMasterMoveFrame()
         }
     })
 
-    -- Apply the correct scale whenever the active EditMode layout changes
-    if not zSkyridingBar.lemLayoutCallbackRegistered then
-        zSkyridingBar.lemLayoutCallbackRegistered = true
-        LEM:RegisterCallback('layout', function(layoutName)
-            if masterMoveFrame then
-                masterMoveFrame:SetScale(zSkyridingBar.db.profile.masterMoveFrameScales[layoutName] or 1.0)
-            end
-        end)
-    end
 end
 
 function zSkyridingBar:CreateSpeedBarFrame()
-    speedBarFrame = CreateFrame("Frame", "zSkyridingBarSpeedBarFrame", masterMoveFrame)
-    speedBarFrame:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
-    speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", self.db.profile.speedBarX, self.db.profile.speedBarY)
-    speedBarFrame:SetFrameStrata(self.db.profile.frameStrata)
+    local profile = self.db.profile
+    if profile.singleFrameMode then
+        speedBarFrame = CreateFrame("Frame", nil, masterMoveFrame)
+        speedBarFrame:SetPoint("CENTER", masterMoveFrame, "CENTER", profile.speedBarX, profile.speedBarY)
+    else
+        speedBarFrame = CreateFrame("Frame", nil, UIParent)
+        local pt = profile.multiSpeedBarPoint or "CENTER"
+        speedBarFrame:SetPoint(pt, UIParent, pt, profile.multiSpeedBarX, profile.multiSpeedBarY)
+        speedBarFrame.editModeName = "zSkyridingBar - Speed Bar"
+        LEM:AddFrame(speedBarFrame, function(frame, layoutName, point, x, y)
+            zSkyridingBar.db.profile.multiSpeedBarPoint = point
+            zSkyridingBar.db.profile.multiSpeedBarX = x
+            zSkyridingBar.db.profile.multiSpeedBarY = y
+        end, { point = pt, x = profile.multiSpeedBarX, y = profile.multiSpeedBarY })
+        local activeLayout = LEM:GetActiveLayoutName()
+        speedBarFrame:SetScale((activeLayout and profile.multiSpeedBarScales[activeLayout]) or 1.0)
+        LEM:AddFrameSettings(speedBarFrame, { {
+            kind = LEM.SettingType.Slider,
+            name = L["Scale"],
+            default = 1.0,
+            minValue = 0.5,
+            maxValue = 3.0,
+            valueStep = 0.05,
+            get = function(layoutName)
+                return zSkyridingBar.db.profile.multiSpeedBarScales[layoutName] or 1.0
+            end,
+            set = function(layoutName, value)
+                zSkyridingBar.db.profile.multiSpeedBarScales[layoutName] = value
+                if speedBarFrame then speedBarFrame:SetScale(value) end
+            end,
+        } })
+    end
+    speedBarFrame:SetSize(profile.speedBarWidth, profile.speedBarHeight)
+    speedBarFrame:SetFrameStrata(profile.frameStrata)
     speedBarFrame:SetFrameLevel(10)
 
     -- Speed bar (status bar)
-    speedBar = CreateFrame("StatusBar", "zSkyridingBarSpeedBar", speedBarFrame)
+    speedBar = CreateFrame("StatusBar", nil, speedBarFrame)
     speedBar:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
     speedBar:SetPoint("TOP", speedBarFrame, "TOP", 0, 0)
 
@@ -750,13 +847,43 @@ function zSkyridingBar:CreateSpeedBarFrame()
 end
 
 function zSkyridingBar:CreateChargesBarFrame()
-    chargesBarFrame = CreateFrame("Frame", "zSkyridingBarChargesBarFrame", masterMoveFrame)
-    chargesBarFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
-    chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", self.db.profile.chargesBarX, self.db.profile.chargesBarY)
-    chargesBarFrame:SetFrameStrata(self.db.profile.frameStrata)
+    local profile = self.db.profile
+    if profile.singleFrameMode then
+        chargesBarFrame = CreateFrame("Frame", nil, masterMoveFrame)
+        chargesBarFrame:SetPoint("TOP", speedBarFrame, "BOTTOM", profile.chargesBarX, profile.chargesBarY)
+    else
+        chargesBarFrame = CreateFrame("Frame", nil, UIParent)
+        local pt = profile.multiChargesBarPoint or "CENTER"
+        chargesBarFrame:SetPoint(pt, UIParent, pt, profile.multiChargesBarX, profile.multiChargesBarY)
+        chargesBarFrame.editModeName = "zSkyridingBar - Charges"
+        LEM:AddFrame(chargesBarFrame, function(frame, layoutName, point, x, y)
+            zSkyridingBar.db.profile.multiChargesBarPoint = point
+            zSkyridingBar.db.profile.multiChargesBarX = x
+            zSkyridingBar.db.profile.multiChargesBarY = y
+        end, { point = pt, x = profile.multiChargesBarX, y = profile.multiChargesBarY })
+        local activeLayout = LEM:GetActiveLayoutName()
+        chargesBarFrame:SetScale((activeLayout and profile.multiChargesBarScales[activeLayout]) or 1.0)
+        LEM:AddFrameSettings(chargesBarFrame, { {
+            kind = LEM.SettingType.Slider,
+            name = L["Scale"],
+            default = 1.0,
+            minValue = 0.5,
+            maxValue = 3.0,
+            valueStep = 0.05,
+            get = function(layoutName)
+                return zSkyridingBar.db.profile.multiChargesBarScales[layoutName] or 1.0
+            end,
+            set = function(layoutName, value)
+                zSkyridingBar.db.profile.multiChargesBarScales[layoutName] = value
+                if chargesBarFrame then chargesBarFrame:SetScale(value) end
+            end,
+        } })
+    end
+    chargesBarFrame:SetSize(profile.chargeBarWidth, profile.chargeBarHeight)
+    chargesBarFrame:SetFrameStrata(profile.frameStrata)
     chargesBarFrame:SetFrameLevel(10)
 
-    chargeFrame = CreateFrame("Frame", "zSkyridingBarChargeFrame", chargesBarFrame)
+    chargeFrame = CreateFrame("Frame", nil, chargesBarFrame)
     chargeFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
     chargeFrame:SetPoint("TOP", chargesBarFrame, "TOP", 0, 0)
 
@@ -766,7 +893,7 @@ function zSkyridingBar:CreateChargesBarFrame()
     local barWidth = (self.db.profile.chargeBarWidth - ((numBars - 1) * self.db.profile.chargeBarSpacing)) / numBars
 
     for i = 1, numBars do
-        local bar = CreateFrame("StatusBar", "zSkyridingBarChargeBar" .. i, chargeFrame)
+        local bar = CreateFrame("StatusBar", nil, chargeFrame)
         bar:SetSize(barWidth, self.db.profile.chargeBarHeight)
 
         if i == 1 then
@@ -819,11 +946,40 @@ function zSkyridingBar:CreateChargesBarFrame()
 end
 
 function zSkyridingBar:CreateSpeedAbilityFrame()
-    speedAbilityFrame = CreateFrame("Frame", "zSkyridingBarSpeedAbilityFrame", masterMoveFrame)
+    local profile = self.db.profile
+    if profile.singleFrameMode then
+        speedAbilityFrame = CreateFrame("Frame", nil, masterMoveFrame)
+        speedAbilityFrame:SetPoint("TOPRIGHT", speedBarFrame, "TOPLEFT", profile.speedAbilityX, profile.speedAbilityY)
+    else
+        speedAbilityFrame = CreateFrame("Frame", nil, UIParent)
+        local pt = profile.multiSpeedAbilityPoint or "CENTER"
+        speedAbilityFrame:SetPoint(pt, UIParent, pt, profile.multiSpeedAbilityX, profile.multiSpeedAbilityY)
+        speedAbilityFrame.editModeName = "zSkyridingBar - Ability"
+        LEM:AddFrame(speedAbilityFrame, function(frame, layoutName, point, x, y)
+            zSkyridingBar.db.profile.multiSpeedAbilityPoint = point
+            zSkyridingBar.db.profile.multiSpeedAbilityX = x
+            zSkyridingBar.db.profile.multiSpeedAbilityY = y
+        end, { point = pt, x = profile.multiSpeedAbilityX, y = profile.multiSpeedAbilityY })
+        local activeLayout = LEM:GetActiveLayoutName()
+        speedAbilityFrame:SetScale((activeLayout and profile.multiSpeedAbilityScales[activeLayout]) or 1.0)
+        LEM:AddFrameSettings(speedAbilityFrame, { {
+            kind = LEM.SettingType.Slider,
+            name = L["Scale"],
+            default = 1.0,
+            minValue = 0.5,
+            maxValue = 3.0,
+            valueStep = 0.05,
+            get = function(layoutName)
+                return zSkyridingBar.db.profile.multiSpeedAbilityScales[layoutName] or 1.0
+            end,
+            set = function(layoutName, value)
+                zSkyridingBar.db.profile.multiSpeedAbilityScales[layoutName] = value
+                if speedAbilityFrame then speedAbilityFrame:SetScale(value) end
+            end,
+        } })
+    end
     speedAbilityFrame:SetSize(40, 40)
-    speedAbilityFrame:SetPoint("CENTER", speedBarFrame, "CENTER", self.db.profile.speedAbilityX, self.db.profile
-        .speedAbilityY)
-    speedAbilityFrame:SetFrameStrata(self.db.profile.frameStrata)
+    speedAbilityFrame:SetFrameStrata(profile.frameStrata)
     speedAbilityFrame:SetFrameLevel(10)
 
     -- Icon for Static Charge
@@ -886,14 +1042,44 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
 end
 
 function zSkyridingBar:CreateSecondWindFrame()
-    secondWindFrame = CreateFrame("Frame", "zSkyridingBarSecondWindFrame", masterMoveFrame)
-    secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
-    secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", self.db.profile.secondWindX, self.db.profile.secondWindY)
-    secondWindFrame:SetFrameStrata(self.db.profile.frameStrata)
+    local profile = self.db.profile
+    if profile.singleFrameMode then
+        secondWindFrame = CreateFrame("Frame", nil, masterMoveFrame)
+        secondWindFrame:SetPoint("CENTER", chargesBarFrame, "CENTER", profile.secondWindX, profile.secondWindY)
+    else
+        secondWindFrame = CreateFrame("Frame", nil, UIParent)
+        local pt = profile.multiSecondWindPoint or "CENTER"
+        secondWindFrame:SetPoint(pt, UIParent, pt, profile.multiSecondWindX, profile.multiSecondWindY)
+        secondWindFrame.editModeName = "zSkyridingBar - Second Wind"
+        LEM:AddFrame(secondWindFrame, function(frame, layoutName, point, x, y)
+            zSkyridingBar.db.profile.multiSecondWindPoint = point
+            zSkyridingBar.db.profile.multiSecondWindX = x
+            zSkyridingBar.db.profile.multiSecondWindY = y
+        end, { point = pt, x = profile.multiSecondWindX, y = profile.multiSecondWindY })
+        local activeLayout = LEM:GetActiveLayoutName()
+        secondWindFrame:SetScale((activeLayout and profile.multiSecondWindScales[activeLayout]) or 1.0)
+        LEM:AddFrameSettings(secondWindFrame, { {
+            kind = LEM.SettingType.Slider,
+            name = L["Scale"],
+            default = 1.0,
+            minValue = 0.5,
+            maxValue = 3.0,
+            valueStep = 0.05,
+            get = function(layoutName)
+                return zSkyridingBar.db.profile.multiSecondWindScales[layoutName] or 1.0
+            end,
+            set = function(layoutName, value)
+                zSkyridingBar.db.profile.multiSecondWindScales[layoutName] = value
+                if secondWindFrame then secondWindFrame:SetScale(value) end
+            end,
+        } })
+    end
+    secondWindFrame:SetSize(profile.secondWindBarWidth, profile.secondWindBarHeight)
+    secondWindFrame:SetFrameStrata(profile.frameStrata)
     secondWindFrame:SetFrameLevel(10)
 
     -- Second Wind bar (status bar for the single charge display)
-    secondWindBar = CreateFrame("StatusBar", "zSkyridingBarSecondWindBar", secondWindFrame)
+    secondWindBar = CreateFrame("StatusBar", nil, secondWindFrame)
     secondWindBar:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
     secondWindBar:SetPoint("TOP", secondWindFrame, "TOP", 0, 0)
 
@@ -1154,10 +1340,10 @@ function zSkyridingBar:StopTracking()
     previousChargeCount = 0
     chargesInitialized = false
 
-    if speedBarFrame then speedBarFrame:Hide() end
-    if chargesBarFrame then chargesBarFrame:Hide() end
-    if speedAbilityFrame then speedAbilityFrame:Hide() end
-    if secondWindFrame then secondWindFrame:Hide() end
+    if speedBarFrame and not LEM:IsInEditMode() then speedBarFrame:Hide() end
+    if chargesBarFrame and not LEM:IsInEditMode() then chargesBarFrame:Hide() end
+    if speedAbilityFrame and not LEM:IsInEditMode() then speedAbilityFrame:Hide() end
+    if secondWindFrame and not LEM:IsInEditMode() then secondWindFrame:Hide() end
     if InCombatLockdown() then return end
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame then UIWidgetPowerBarContainerFrame:Show() end
@@ -1186,6 +1372,7 @@ function zSkyridingBar:UpdateTracking()
     local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
 
     if not isGliding and not isFlying then
+        if LEM:IsInEditMode() then return end
         if speedBar then speedBar:Hide() end
         if speedBarFrame then speedBarFrame:Hide() end
         if chargesBarFrame then chargesBarFrame:Hide() end
