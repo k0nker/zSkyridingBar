@@ -413,8 +413,15 @@ function zSkyridingBar:OnInitialize()
         end
     end)
 
-    C_Timer.After(3, function()
-            self:CreateAllFrames()
+    C_Timer.After(10, function()
+        self:CreateAllFrames()
+        -- Immediately correct show/hide state after frame creation.
+        self:CheckSkyridingAvailability()
+        -- Continue polling every 5 seconds for the first 30 seconds after login to
+        -- catch slow-render cases where frames may be left in the wrong show/hide state.
+        C_Timer.NewTicker(5, function()
+            self:CheckSkyridingAvailability()
+        end, 6)
     end)
     --self:CreateAllFrames()
 
@@ -1440,10 +1447,8 @@ function zSkyridingBar:CheckSkyridingAvailability()
             self:StartTracking()
         end
     else
-        if active then
-            active = false
-            self:StopTracking()
-        end
+        active = false
+        self:StopTracking()
     end
 end
 
