@@ -108,7 +108,7 @@ L["Monochrome"] = "Monocromo"
 -- Print/Command/Status strings from zSkyridingBar.lua
 L["Detected interface version "] = "Versión de interfaz detectada "
 L["Compatibility mode enabled"] = "Modo de compatibilidad habilitado"
-L["Combat lockdown active. UI updates paused."] = "Bloqueo de combate activo. Actualizaciones de UI en pausa."
+
 L["Move mode enabled - Drag frames to reposition."] = "Modo de movimiento habilitado - Arrastra los marcos para reposicionar."
 L["zSkyridingBar Move Mode Active"] = "Modo de movimiento de zSkyridingBar activo"
 L["Move mode disabled."] = "Modo de movimiento deshabilitado."
@@ -120,3 +120,5 @@ L["Open EditMode to reposition the addon"] = "Abrir EditMode para reposicionar e
 L["Open EditMode to reposition"] = "Abrir EditMode para reposicionar"
 L["Toggle addon"] = "Alternar addon"
 L["Second Wind Charges"] = "Cargas de segundo viento"
+L["Show Ability Cooldown Text"] = "Mostrar texto de reutilización de habilidad"
+L["Show remaining cooldown time on speed ability"] = "Mostrar el tiempo de reutilización restante de la habilidad de velocidad"

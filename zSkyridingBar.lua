@@ -22,7 +22,7 @@ local ASCENT_SPELL_ID = 372610
 local THRILL_BUFF_ID = 377234
 local STATIC_CHARGE_BUFF_ID = 418590
 local SURGE_FORWARD_SPELL_ID = 372608
-local SECOND_WIND_SPELL_ID = 1227950
+local SECOND_WIND_SPELL_ID = 425782
 local WHIRLING_SURGE_SPELL_ID = 361584 -- Whirling Surge ability
 local LIGHTNING_RUSH_SPELL_ID = 418592 -- Lightning Rush ability
 local SLOW_SKYRIDING_RATIO = 705 / 830
@@ -57,7 +57,6 @@ local CompatCheck = false
 if BuildInterface <= 110205 then
     CompatCheck = true
     UIWidgetPowerBarContainerFrame = UIWidgetPowerBarContainerFrame
-    SECOND_WIND_SPELL_ID = 425782 -- Compatibility mode spell ID
 end
 
 -- Function to get default texture based on availability
@@ -157,6 +156,8 @@ local defaults = {
         secondWindOneChargeColor = { 0.53, 0.29, 0.2, 1 }, -- background for 1 charge, fill for charging to 1
         secondWindTwoChargeColor = { 0.25, 0.9, 0.6, 1 },  -- background for 2 charges, fill for charging to 2
         secondWindThreeChargeColor = { 0.2, 0.5, 0.8, 1 }, -- background for 3 charges, fill for charging to 3
+        -- Speed ability settings
+        showAbilityCooldownText = false,
         -- Whirling Surge settings
         whirlingSurgeSize = 40,
         whirlingSurgeTexture = getDefaultTexture(),
@@ -273,7 +274,6 @@ local abilityFrameDirty = true      -- set by UNIT_AURA / SPELL_UPDATE_COOLDOWN;
 local GetTime = GetTime
 local C_PlayerInfo = C_PlayerInfo
 local C_UnitAuras = C_UnitAuras
-local InCombatLockdown = InCombatLockdown
 
 -- Helper: Play sound
 local function playChargeSound(soundId)
@@ -354,55 +354,36 @@ function zSkyridingBar:OnInitialize()
     eventFrame:RegisterEvent("PLAYER_LOGIN")
     eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     eventFrame:RegisterEvent("UNIT_AURA")
-    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    eventFrame:RegisterEvent("ZONE_CHANGED")
     eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
     eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
-    eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
     eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
     if CompatCheck then
         eventFrame:RegisterEvent("UPDATE_UI_WIDGET")
     end
 
     eventFrame:SetScript("OnEvent", function(frame, event, ...)
-        -- if InCombatLockdown() then return end
         if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
         if event == "ADDON_LOADED" and select(1, ...) == "zSkyridingBar" then
             zSkyridingBar:OnAddonLoaded()
-            if InCombatLockdown() then return end
         elseif event == "PLAYER_ENTERING_WORLD" then
             zSkyridingBar:OnPlayerEnteringWorld()
-            if InCombatLockdown() then return end
         elseif event == "PLAYER_LOGIN" then
             zSkyridingBar:OnPlayerLogin()
         elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-            if InCombatLockdown() then return end
             if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             zSkyridingBar:OnSpellcastSucceeded(event, ...)
         elseif event == "UNIT_AURA" then
-            if InCombatLockdown() then return end
             if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             local unitTarget = select(1, ...)
             zSkyridingBar:OnUnitAura(unitTarget)
-        elseif event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED" then
-            zSkyridingBar:OnZoneChanged()
         elseif event == "UNIT_POWER_UPDATE" then
-            if InCombatLockdown() then return end
             if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             local unitTarget, powerType = select(1, ...), select(2, ...)
             zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
         elseif event == "PLAYER_CAN_GLIDE_CHANGED" then
-            -- if InCombatLockdown() then return end
             if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             zSkyridingBar:CheckSkyridingAvailability()
-            local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
-            if not isGliding and not isFlying then
-                hasSkyriding = false
-            else
-                hasSkyriding = true
-            end
         elseif event == "UPDATE_UI_WIDGET" then
-            if InCombatLockdown() then return end
             if EditModeManagerFrame and EditModeManagerFrame.editModeActive then return end
             if CompatCheck then
                 local widgetInfo = select(1, ...)
@@ -415,13 +396,7 @@ function zSkyridingBar:OnInitialize()
 
     C_Timer.After(10, function()
         self:CreateAllFrames()
-        -- Immediately correct show/hide state after frame creation.
         self:CheckSkyridingAvailability()
-        -- Continue polling every 5 seconds for the first 30 seconds after login to
-        -- catch slow-render cases where frames may be left in the wrong show/hide state.
-        C_Timer.NewTicker(5, function()
-            self:CheckSkyridingAvailability()
-        end, 6)
     end)
     --self:CreateAllFrames()
 
@@ -529,6 +504,36 @@ function zSkyridingBar:DeleteCurrentProfile()
     self.db:SetProfile("Default")
     self.db:DeleteProfile(current, true)
     zSkyridingBar.print(L["Profile deleted"] .. ": " .. current)
+end
+
+-- Copy the named profile's settings into the current profile.
+function zSkyridingBar:CopyProfile(sourceName)
+    if not sourceName or not self.db.profiles[sourceName] then
+        zSkyridingBar.print(L["Profile does not exist"])
+        return false
+    end
+    self.db:CopyProfile(sourceName)
+    self:RefreshConfig()
+    zSkyridingBar.print(L["Settings copied."])
+    return true
+end
+
+-- Delete any profile by name (except Classic/Thick).
+-- Switches to "Default" first if the target is currently active.
+function zSkyridingBar:DeleteProfile(name)
+    if not name or name == "Classic" or name == "Thick" then
+        zSkyridingBar.print(L["Cannot delete Classic or Thick profiles"])
+        return false
+    end
+    if not self.db.profiles[name] then
+        return false
+    end
+    if self.db:GetCurrentProfile() == name then
+        self.db:SetProfile("Default")
+    end
+    self.db:DeleteProfile(name, true)
+    zSkyridingBar.print(L["Profile deleted"] .. ": " .. name)
+    return true
 end
 
 function zSkyridingBar:OnPlayerLogin()
@@ -677,12 +682,12 @@ function zSkyridingBar:RefreshConfig()
     if self._seeding then return end
     -- Update frame positions and appearance without destroying
     --self:UpdateFramePositions()
-    if InCombatLockdown() then
-        zSkyridingBar.print(L["Combat lockdown active. UI updates paused."])
-        return
-    end
     self:UpdateAllFrameAppearance()
     self:UpdateFonts()
+    -- Sync countdown text visibility on the native Cooldown frame
+    if speedAbilityFrame and speedAbilityFrame.cooldown then
+        speedAbilityFrame.cooldown:SetHideCountdownNumbers(not self.db.profile.showAbilityCooldownText)
+    end
     -- Update default vigor UI visibility
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
@@ -736,10 +741,6 @@ function zSkyridingBar:CreateAllFrames()
     self:CreateChargesBarFrame()
     self:CreateSpeedAbilityFrame()
     self:CreateSecondWindFrame()
-    if InCombatLockdown() then
-        zSkyridingBar.print(L["Combat lockdown active. UI updates paused."])
-        return
-    end
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
             UIWidgetPowerBarContainerFrame:Hide()
@@ -1153,6 +1154,19 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     staticChargeText:SetText("")
     staticChargeText:Hide()
 
+    -- Native Cooldown frame: WoW updates its countdown text every game frame, so it never freezes during GCD
+    local cooldownFrame = CreateFrame("Cooldown", nil, speedAbilityFrame, "CooldownFrameTemplate")
+    cooldownFrame:SetAllPoints(speedAbilityFrame)
+    cooldownFrame:SetDrawSwipe(false)   -- we use our own reverse-fill overlay
+    cooldownFrame:SetDrawEdge(false)
+    cooldownFrame:SetHideCountdownNumbers(not self.db.profile.showAbilityCooldownText)
+    -- Fire an ability-frame re-evaluation when a cooldown expires naturally (mirrors Falcon's approach)
+    cooldownFrame:HookScript("OnCooldownDone", function()
+        abilityFrameDirty = true
+        zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
+    end)
+    speedAbilityFrame.cooldown = cooldownFrame
+
     speedAbilityFrame:Hide()
 end
 
@@ -1394,10 +1408,6 @@ function zSkyridingBar:OnPlayerEnteringWorld()
     self:CheckSkyridingAvailability()
 end
 
-function zSkyridingBar:OnZoneChanged()
-    self:ScheduleTimer(function() self:CheckSkyridingAvailability() end, 0.1)
-end
-
 if CompatCheck then
     function zSkyridingBar:OnUpdateUIWidget(widgetInfo)
         -- Handle UI widget updates for vigor bars
@@ -1418,14 +1428,12 @@ function zSkyridingBar:OnUnitAura(unitTarget)
 end
 
 function zSkyridingBar:OnUnitPowerUpdate(unitTarget, powerType)
-    if InCombatLockdown() then return end
     if unitTarget == "player" and powerType == "ALTERNATE" then
         self:UpdateChargeBars()
     end
 end
 
 function zSkyridingBar:OnSpellcastSucceeded(event, unitTarget, castGUID, spellId)
-    if InCombatLockdown() then return end
     if unitTarget == "player" and spellId == ASCENT_SPELL_ID then
         ascentStart = GetTime()
     end
@@ -1453,7 +1461,6 @@ function zSkyridingBar:CheckSkyridingAvailability()
 end
 
 function zSkyridingBar:StartTracking()
-    if InCombatLockdown() then return end
     if not updateHandle then
         active = true
         updateHandle = self:ScheduleRepeatingTimer("UpdateTracking", TICK_RATE)
@@ -1466,8 +1473,11 @@ function zSkyridingBar:StartTracking()
         if chargesBarFrame then
             if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
         end
+        -- Do NOT pre-show speedAbilityFrame here.
+        -- UpdateStaticChargeAndWhirlingSurge (called below) owns its visibility entirely.
+        -- Pre-showing it would cause the stale Cooldown child frame to flash for one render frame.
         if speedAbilityFrame then
-            if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() else speedAbilityFrame:Show() end
+            if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() end
         end
         if secondWindFrame then
             if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
@@ -1506,9 +1516,20 @@ function zSkyridingBar:StopTracking()
 
     if speedBarFrame and not LEM:IsInEditMode() then speedBarFrame:Hide() end
     if chargesBarFrame and not LEM:IsInEditMode() then chargesBarFrame:Hide() end
-    if speedAbilityFrame and not LEM:IsInEditMode() then speedAbilityFrame:Hide() end
+    if speedAbilityFrame and not LEM:IsInEditMode() then
+        -- Wipe stale cooldown data so it cannot flash when the frame is next shown on remount
+        if speedAbilityFrame.cooldown then
+            speedAbilityFrame.cooldown:SetCooldown(0, 0)
+            speedAbilityFrame.cooldown:Hide()
+        end
+        if speedAbilityFrame.whirlingSurgeReverseFill then
+            speedAbilityFrame.whirlingSurgeReverseFill:Hide()
+        end
+        if staticChargeIcon then staticChargeIcon:Hide() end
+        if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
+        speedAbilityFrame:Hide()
+    end
     if secondWindFrame and not LEM:IsInEditMode() then secondWindFrame:Hide() end
-    if InCombatLockdown() then return end
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame then UIWidgetPowerBarContainerFrame:Show() end
     end
@@ -1523,7 +1544,6 @@ function zSkyridingBar:UpdateTracking()
     end
 
     if not speedBar then return end
-    if InCombatLockdown() then return end
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
             UIWidgetPowerBarContainerFrame:Hide()
@@ -1590,13 +1610,13 @@ function zSkyridingBar:UpdateTracking()
 
     self:UpdatespeedBarNormalColors(forwardSpeed)
 
-    if not InCombatLockdown() and abilityFrameDirty then
+    if abilityFrameDirty then
         self:UpdateStaticChargeAndWhirlingSurge()
     end
 end
 
 function zSkyridingBar:UpdateBarValues()
-    if not active or not speedBar or InCombatLockdown() then return end
+    if not active or not speedBar then return end
 
     local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
     if not isGliding and not isFlying then return end
@@ -1613,7 +1633,7 @@ function zSkyridingBar:UpdateBarValues()
 end
 
 function zSkyridingBar:UpdatespeedBarNormalColors(currentSpeed)
-    if not speedBar or InCombatLockdown() then return end
+    if not speedBar then return end
 
     local maxGlideSpeed = isSlowSkyriding and SLOW_ZONE_MAX_GLIDE or FAST_ZONE_MAX_GLIDE
     local inFastMode = currentSpeed and currentSpeed > (maxGlideSpeed + 0.1) or false
@@ -1629,7 +1649,6 @@ end
 
 if CompatCheck then
     function zSkyridingBar:UpdateVigorFromWidget(widgetInfo)
-        if InCombatLockdown() then return end
         -- Use UI widget system like WeakAuras does
         if not widgetInfo or not widgetInfo.widgetID then
             return
@@ -1681,8 +1700,7 @@ if CompatCheck then
 end
 
 function zSkyridingBar:UpdateChargeBars()
-    if InCombatLockdown() then return end
-    if not chargeFrame or not chargeFrame.bars or InCombatLockdown() then return end
+    if not chargeFrame or not chargeFrame.bars then return end
 
     if CompatCheck then
         return
@@ -1737,8 +1755,7 @@ function zSkyridingBar:UpdateChargeBars()
 end
 
 function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
-    if InCombatLockdown() then return end
-    if not speedAbilityFrame or InCombatLockdown() then return end
+    if not speedAbilityFrame then return end
     if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() abilityFrameDirty = false return end
     abilityFrameDirty = false  -- cleared each call; set true below only if fill animation still in progress
     local fillActive = false   -- tracks whether a cooldown fill needs another tick
@@ -1761,11 +1778,14 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
         if staticChargeText then staticChargeText:SetText(staticChargeAura.applications or 0) end
         if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
         if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
-        -- hide the whirling surge reverse fill if lightning surge isn't on cooldown currently
+        -- hide the whirling surge reverse fill if lightning rush is not actually on cooldown
         local lightningSurgeCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-        if lightningSurgeCooldownInfo and not lightningSurgeCooldownInfo.isEnabled then
+        if not lightningSurgeCooldownInfo or lightningSurgeCooldownInfo.duration <= 0 or lightningSurgeCooldownInfo.startTime <= 0 then
             if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
                 speedAbilityFrame.whirlingSurgeReverseFill:Hide()
+            end
+            if speedAbilityFrame and speedAbilityFrame.cooldown then
+                speedAbilityFrame.cooldown:Hide()
             end
             if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
                 speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
@@ -1785,10 +1805,16 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
             speedAbilityFrame.cooldown:Hide()
         end
         local lightningRushCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-        if lightningRushCooldownInfo and lightningRushCooldownInfo.isEnabled and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
+        if lightningRushCooldownInfo and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
             if lightningRushCooldownInfo.duration < 2 then
+                abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
                 return
             end
+            -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
+            if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
+                speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
+            end
+            if staticChargeIcon then staticChargeIcon:SetAlpha(1) end
             if speedAbilityFrame and speedAbilityFrame.cooldown then
                 speedAbilityFrame.cooldown:SetCooldown(lightningRushCooldownInfo.startTime,
                     lightningRushCooldownInfo.duration)
@@ -1846,12 +1872,20 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
 
     -- If no Static Charge, check Lightning Rush cooldown
     local lightningRushCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-    if lightningRushCooldownInfo and lightningRushCooldownInfo.isEnabled and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
+    if lightningRushCooldownInfo and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
         if lightningRushCooldownInfo.duration < 2 then
+            abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
             return
         end
         if speedAbilityFrame then speedAbilityFrame:Show() end
-        if staticChargeIcon then staticChargeIcon:Show() end
+        -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
+        if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
+            speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
+        end
+        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeIconFadeAnimGroup then
+            speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
+        end
+        if staticChargeIcon then staticChargeIcon:SetAlpha(1) staticChargeIcon:Show() end
         if staticChargeText then staticChargeText:Hide() end
         if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
         if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
@@ -1913,12 +1947,21 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
 
     local cooldownInfo = C_Spell.GetSpellCooldown(WHIRLING_SURGE_SPELL_ID)
     local shineTriggered = false
-    if cooldownInfo and cooldownInfo.isEnabled and cooldownInfo.duration > 0 and cooldownInfo.startTime > 0 then
+    if cooldownInfo and cooldownInfo.duration > 0 and cooldownInfo.startTime > 0 then
         if cooldownInfo.duration < 2 then
+            abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
             return
         end
         if speedAbilityFrame then speedAbilityFrame:Show() end
-        if whirlingSurgeIcon then whirlingSurgeIcon:Show() end
+        -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
+        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeIconFadeAnimGroup then
+            speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
+        end
+        if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
+            speedAbilityFrame.shineFadeAnimGroup:Stop()
+            if speedAbilityFrame.whirlingSurgeShine then speedAbilityFrame.whirlingSurgeShine:SetAlpha(0) end
+        end
+        if whirlingSurgeIcon then whirlingSurgeIcon:SetAlpha(1) whirlingSurgeIcon:Show() end
         if staticChargeIcon then staticChargeIcon:Hide() end
         if staticChargeText then staticChargeText:Hide() end
         if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
@@ -1972,6 +2015,7 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
         if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
             speedAbilityFrame.whirlingSurgeReverseFill:Hide()
         end
+        if speedAbilityFrame and speedAbilityFrame.cooldown then speedAbilityFrame.cooldown:Hide() end
         if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
             speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
         end
@@ -1986,8 +2030,7 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
 end
 
 function zSkyridingBar:UpdateSecondWind()
-    if InCombatLockdown() then return end
-    if not secondWindBar or not secondWindFrame or InCombatLockdown() then return end
+    if not secondWindBar or not secondWindFrame then return end
 
     local spellChargeInfo = C_Spell.GetSpellCharges(SECOND_WIND_SPELL_ID)
 

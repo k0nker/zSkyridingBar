@@ -22,10 +22,62 @@ local function isBuiltinProfile()
     return cur == "Classic" or cur == "Thick"
 end
 
+-- State for the Modify Profiles dropdown.
+local selectedProfileForActions = nil
+
+-- Serialize + compress a profile table into a shareable print-safe string.
+local function exportProfile(profile)
+    local serialized = LibStub("AceSerializer-3.0"):Serialize(profile)
+    local LibDeflate = LibStub("LibDeflate")
+    if LibDeflate then
+        local compressed = LibDeflate:CompressDeflate(serialized)
+        if compressed then
+            local encoded = LibDeflate:EncodeForPrint(compressed)
+            if encoded then return encoded end
+        end
+    end
+    return serialized
+end
+
+-- Decode + decompress a shareable string back into a validated profile table.
+local function importProfile(exportString)
+    if not exportString or exportString == "" then
+        return nil, L["Invalid export string format"]
+    end
+    exportString = exportString:gsub("^%s+", ""):gsub("%s+$", "")
+    local LibDeflate = LibStub("LibDeflate")
+    local decompressed = nil
+    if LibDeflate then
+        local decoded = LibDeflate:DecodeForPrint(exportString)
+        if decoded then
+            decompressed = LibDeflate:DecompressDeflate(decoded)
+        end
+    end
+    local dataToDeserialize = decompressed or exportString
+    local success, profile = LibStub("AceSerializer-3.0"):Deserialize(dataToDeserialize)
+    if not success then
+        return nil, L["Failed to decode export string"]
+    end
+    if not profile or type(profile) ~= "table" then
+        return nil, L["Invalid export string - not a valid profile"]
+    end
+    local defaults = zSkyridingBar.db.defaults.profile
+    local validatedProfile = {}
+    for key, defaultValue in pairs(defaults) do
+        if profile[key] ~= nil then
+            validatedProfile[key] = profile[key]
+        else
+            validatedProfile[key] = defaultValue
+        end
+    end
+    return validatedProfile
+end
+
 
 -- Options table
 local options = {
     type = "group",
+    childGroups = "tab",
     name = "zSkyridingBar",
     handler = zSkyridingBar,
     get = function(info)
@@ -72,77 +124,11 @@ local options = {
             width = 0.8,
         },
 
-
         generalGroup = {
             order = nextOrder(),
             type = "group",
             name = L["General"],
-            inline = true,
             args = {
-                profilesHeader = {
-                    order = nextOrder(),
-                    type = "header",
-                    name = L["Profile"],
-                },
-                activeProfile = {
-                    order = nextOrder(),
-                    type = "select",
-                    name = L["Active Profile"],
-                    desc = L["Switch between saved setting profiles"],
-                    values = function()
-                        -- Always show Classic and Thick even before they are seeded
-                        local profiles = { Classic = "Classic", Thick = "Thick" }
-                        for name, _ in pairs(zSkyridingBar.db.profiles) do
-                            profiles[name] = name
-                        end
-                        return profiles
-                    end,
-                    get = function()
-                        return zSkyridingBar.db:GetCurrentProfile()
-                    end,
-                    set = function(_, value)
-                        zSkyridingBar.db:SetProfile(value)
-                        zSkyridingBar:RefreshConfig()
-                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
-                    end,
-                    width = "double",
-                },
-                newProfile = {
-                    order = nextOrder(),
-                    type = "input",
-                    name = L["New Profile"],
-                    desc = L["Type a name and press Enter to create a new profile"],
-                    get = function() return "" end,
-                    set = function(_, value)
-                        if not value or value == "" then return end
-                        zSkyridingBar:CreateNewProfile(value)
-                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
-                    end,
-                },
-                deleteProfile = {
-                    order = nextOrder(),
-                    type = "execute",
-                    name = L["Delete Profile"],
-                    desc = L["Delete the current profile (cannot delete Classic or Thick)"],
-                    disabled = function()
-                        local cur = zSkyridingBar.db:GetCurrentProfile()
-                        return cur == "Classic" or cur == "Thick"
-                    end,
-                    confirm = function()
-                        return L["Are you sure you want to delete the profile: "] ..
-                            "'" .. zSkyridingBar.db:GetCurrentProfile() .. "'?"
-                    end,
-                    func = function()
-                        zSkyridingBar:DeleteCurrentProfile()
-                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
-                    end,
-                },
-                profileSpacer = {
-                    order = nextOrder(),
-                    type = "description",
-                    name = "",
-                    width = "full",
-                },
                 generalHeader = {
                     order = nextOrder(),
                     type = "header",
@@ -339,7 +325,6 @@ local options = {
             order = nextOrder(),
             type = "group",
             name = L["Position and Size"],
-            inline = true,
             args = {
                 frameHeader = {
                     order = nextOrder(),
@@ -406,6 +391,18 @@ local options = {
                     type = "header",
                     name = L["Bar Settings"],
                 },
+                builtinProfileNotice = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = function()
+                        return string.format(
+                            L["Some size settings are hidden because the \"%s\" profile is selected. Switch to a custom profile to edit them."],
+                            zSkyridingBar.db:GetCurrentProfile()
+                        )
+                    end,
+                    width = "full",
+                    hidden = function() return not isBuiltinProfile() end,
+                },
                 speedBarWidth = {
                     order = nextOrder(),
                     type = "range",
@@ -414,7 +411,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.speedBarWidth
                     end,
@@ -431,7 +428,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.speedBarHeight
                     end,
@@ -451,7 +448,7 @@ local options = {
                     type = "execute",
                     name = L["Reset Speed Bar Size"],
                     desc = L["Reset speed bar size to default"],
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     func = function()
                         zSkyridingBar.db.profile.speedBarWidth = zSkyridingBar.db.defaults.profile.speedBarWidth
                         zSkyridingBar.db.profile.speedBarHeight = zSkyridingBar.db.defaults.profile.speedBarHeight
@@ -485,7 +482,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.chargeBarWidth
                     end,
@@ -502,7 +499,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.chargeBarHeight
                     end,
@@ -525,7 +522,7 @@ local options = {
                     min = 0,
                     max = 200,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.chargeBarSpacing
                     end,
@@ -545,7 +542,7 @@ local options = {
                     type = "execute",
                     name = L["Reset Charge Bar Size"],
                     desc = L["Reset charge bar size to default"],
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     func = function()
                         zSkyridingBar.db.profile.chargeBarWidth = zSkyridingBar.db.defaults.profile.chargeBarWidth
                         zSkyridingBar.db.profile.chargeBarHeight = zSkyridingBar.db.defaults.profile.chargeBarHeight
@@ -580,7 +577,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.secondWindBarWidth
                     end,
@@ -597,7 +594,7 @@ local options = {
                     min = 10,
                     max = 800,
                     step = 1,
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     get = function(info)
                         return zSkyridingBar.db.profile.secondWindBarHeight
                     end,
@@ -617,7 +614,7 @@ local options = {
                     type = "execute",
                     name = L["Reset Second Wind Bar Size"],
                     desc = L["Reset second wind bar size to default"],
-                    disabled = isBuiltinProfile,
+                    hidden = isBuiltinProfile,
                     func = function()
                         zSkyridingBar.db.profile.secondWindBarWidth = zSkyridingBar.db.defaults.profile.secondWindBarWidth
                         zSkyridingBar.db.profile.secondWindBarHeight = zSkyridingBar.db.defaults.profile.secondWindBarHeight
@@ -656,6 +653,18 @@ local options = {
                         zSkyridingBar:RefreshConfig()
                     end,
                 },
+                showAbilityCooldownText = {
+                    order = nextOrder(),
+                    type = "toggle",
+                    name = L["Show Ability Cooldown Text"],
+                    desc = L["Show remaining cooldown time on speed ability"],
+                    get = function(info)
+                        return zSkyridingBar.db.profile.showAbilityCooldownText
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.showAbilityCooldownText = value
+                    end,
+                },
             },
         },
 
@@ -663,7 +672,6 @@ local options = {
             order = nextOrder(),
             type = "group",
             name = L["Colors"],
-            inline = true,
             args = {
                 themeHeader = {
                     order = nextOrder(),
@@ -1024,6 +1032,254 @@ local options = {
                         zSkyridingBar:RefreshConfig()
                         zSkyridingBar:UpdateFonts()
                         zSkyridingBar.print(L["Reset colors and textures to defaults."])
+                    end,
+                },
+            },
+        },
+
+        profilesGroup = {
+            order = nextOrder(),
+            type = "group",
+            name = L["Profiles"],
+            args = {
+                activeProfileHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Profile"],
+                },
+                activeProfile = {
+                    order = nextOrder(),
+                    type = "select",
+                    name = L["Active Profile"],
+                    desc = L["Switch between saved setting profiles"],
+                    values = function()
+                        -- Always show Classic and Thick even before they are seeded
+                        local profiles = { Classic = "Classic", Thick = "Thick" }
+                        for name, _ in pairs(zSkyridingBar.db.profiles) do
+                            profiles[name] = name
+                        end
+                        return profiles
+                    end,
+                    get = function()
+                        return zSkyridingBar.db:GetCurrentProfile()
+                    end,
+                    set = function(_, value)
+                        zSkyridingBar.db:SetProfile(value)
+                        zSkyridingBar:RefreshConfig()
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                    width = "double",
+                },
+                newProfile = {
+                    order = nextOrder(),
+                    type = "input",
+                    name = L["New Profile"],
+                    desc = L["Type a name and press Enter to create a new profile"],
+                    get = function() return "" end,
+                    set = function(_, value)
+                        if not value or value == "" then return end
+                        zSkyridingBar:CreateNewProfile(value)
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                resetProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Reset Profile"],
+                    desc = L["Reset current profile to default values"],
+                    confirm = function()
+                        return L["Reset current profile to defaults?"]
+                    end,
+                    func = function()
+                        zSkyridingBar:ResetCurrentProfile()
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                modifySpacer = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                modifyHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Modify Profiles"],
+                },
+                chooseProfile = {
+                    order = nextOrder(),
+                    type = "select",
+                    name = L["Choose Profile to Modify"],
+                    desc = L["Select a profile for copy or delete"],
+                    values = function()
+                        local profiles = {}
+                        local cur = zSkyridingBar.db:GetCurrentProfile()
+                        for name, _ in pairs(zSkyridingBar.db.profiles) do
+                            if name ~= cur then
+                                profiles[name] = name
+                            end
+                        end
+                        return profiles
+                    end,
+                    get = function() return selectedProfileForActions end,
+                    set = function(_, value) selectedProfileForActions = value end,
+                },
+                modifyActionSpacer = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                copyProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Copy Profile"],
+                    desc = L["Copy settings from selected profile into current profile"],
+                    disabled = function() return not selectedProfileForActions end,
+                    confirm = function()
+                        return string.format(
+                            L["Copy '%s' into '%s'? This will overwrite all current settings!"],
+                            selectedProfileForActions or "",
+                            zSkyridingBar.db:GetCurrentProfile()
+                        )
+                    end,
+                    func = function()
+                        zSkyridingBar:CopyProfile(selectedProfileForActions)
+                        selectedProfileForActions = nil
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                deleteProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Delete Profile"],
+                    desc = L["Delete the selected profile (cannot delete Classic or Thick)"],
+                    disabled = function()
+                        return not selectedProfileForActions
+                            or selectedProfileForActions == "Classic"
+                            or selectedProfileForActions == "Thick"
+                    end,
+                    confirm = function()
+                        return string.format(
+                            L["Delete '%s'? This cannot be undone!"],
+                            selectedProfileForActions or ""
+                        )
+                    end,
+                    func = function()
+                        local toDelete = selectedProfileForActions
+                        selectedProfileForActions = nil
+                        zSkyridingBar:DeleteProfile(toDelete)
+                        LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                    end,
+                },
+                importExportSpacer = {
+                    order = nextOrder(),
+                    type = "description",
+                    name = "",
+                    width = "full",
+                },
+                importExportHeader = {
+                    order = nextOrder(),
+                    type = "header",
+                    name = L["Import / Export"],
+                },
+                exportProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Export Profile"],
+                    desc = L["Export current profile as a shareable string"],
+                    func = function()
+                        local exportString = exportProfile(zSkyridingBar.db.profile)
+                        local AceGUI = LibStub("AceGUI-3.0")
+                        local frame = AceGUI:Create("Frame")
+                        frame:SetTitle(L["Export Profile"])
+                        frame:SetStatusText(L["Copy this string to share your settings"])
+                        frame:SetCallback("OnClose", function(widget) AceGUI:Release(widget) end)
+                        frame:SetLayout("Flow")
+                        frame:SetWidth(600)
+                        frame:SetHeight(250)
+                        local editbox = AceGUI:Create("MultiLineEditBox")
+                        editbox:SetLabel(L["Export String:"])
+                        editbox:SetText(exportString)
+                        editbox:SetFullWidth(true)
+                        editbox:SetNumLines(8)
+                        editbox:DisableButton(true)
+                        frame:AddChild(editbox)
+                    end,
+                },
+                importProfile = {
+                    order = nextOrder(),
+                    type = "execute",
+                    name = L["Import Profile"],
+                    desc = L["Import profile settings from an export string"],
+                    func = function()
+                        local AceGUI = LibStub("AceGUI-3.0")
+                        local frame = AceGUI:Create("Frame")
+                        frame:SetTitle(L["Import Profile"])
+                        frame:SetStatusText(L["Paste an export string and click Import"])
+                        frame:SetCallback("OnClose", function(widget) AceGUI:Release(widget) end)
+                        frame:SetLayout("Flow")
+                        frame:SetWidth(600)
+                        frame:SetHeight(300)
+                        local editbox = AceGUI:Create("MultiLineEditBox")
+                        editbox:SetLabel(L["Paste Export String:"])
+                        editbox:SetFullWidth(true)
+                        editbox:SetNumLines(8)
+                        editbox:DisableButton(true)
+                        frame:AddChild(editbox)
+                        local importButton = AceGUI:Create("Button")
+                        importButton:SetText(L["Import"])
+                        importButton:SetWidth(100)
+                        importButton:SetCallback("OnClick", function()
+                            local str = editbox:GetText()
+                            if not str or str == "" then
+                                zSkyridingBar.print(L["Please paste an export string first"])
+                                return
+                            end
+                            local profile, errorMsg = importProfile(str)
+                            if not profile then
+                                zSkyridingBar.print(errorMsg or L["Invalid export string format"])
+                                return
+                            end
+                            AceGUI:Release(frame)
+                            local nameDialog = AceGUI:Create("Frame")
+                            nameDialog:SetTitle(L["Create Profile from Import"])
+                            nameDialog:SetStatusText(L["Enter a name for the imported profile"])
+                            nameDialog:SetCallback("OnClose", function(widget) AceGUI:Release(widget) end)
+                            nameDialog:SetLayout("Flow")
+                            nameDialog:SetWidth(350)
+                            nameDialog:SetHeight(150)
+                            local nameEditbox = AceGUI:Create("EditBox")
+                            nameEditbox:SetLabel(L["Profile Name:"])
+                            nameEditbox:SetFullWidth(true)
+                            nameEditbox:DisableButton(true)
+                            nameDialog:AddChild(nameEditbox)
+                            local createButton = AceGUI:Create("Button")
+                            createButton:SetText(L["Create"])
+                            createButton:SetWidth(100)
+                            createButton:SetCallback("OnClick", function()
+                                local profileName = nameEditbox:GetText()
+                                if not profileName or profileName == "" then
+                                    zSkyridingBar.print(L["Profile name cannot be empty"])
+                                    return
+                                end
+                                if zSkyridingBar.db.profiles[profileName] then
+                                    zSkyridingBar.print(L["Profile already exists"])
+                                    return
+                                end
+                                zSkyridingBar.db:SetProfile(profileName)
+                                for key, value in pairs(profile) do
+                                    zSkyridingBar.db.profile[key] = value
+                                end
+                                zSkyridingBar:RefreshConfig()
+                                zSkyridingBar.print(L["Profile imported"] .. ": " .. profileName)
+                                LibStub("AceConfigRegistry-3.0"):NotifyChange("zSkyridingBar")
+                                nameDialog:Fire("OnClose")
+                            end)
+                            nameDialog:AddChild(createButton)
+                            nameEditbox:SetFocus()
+                        end)
+                        frame:AddChild(importButton)
                     end,
                 },
             },

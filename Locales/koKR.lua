@@ -108,7 +108,7 @@ L["Monochrome"] = "단색"
 -- Print/Command/Status strings from zSkyridingBar.lua
 L["Detected interface version "] = "감지된 인터페이스 버전 "
 L["Compatibility mode enabled"] = "호환 모드 활성화됨"
-L["Combat lockdown active. UI updates paused."] = "전투 잠금 활성화. UI 업데이트 일시 중지."
+
 L["Move mode enabled - Drag frames to reposition."] = "이동 모드 활성화 - 프레임을 드래그하여 재배치."
 L["zSkyridingBar Move Mode Active"] = "zSkyridingBar 이동 모드 활성화"
 L["Move mode disabled."] = "이동 모드 비활성화."
@@ -118,4 +118,6 @@ L["Open options"] = "옵션 열기"
 L["Toggle move mode"] = "이동 모드 전환"L["Open EditMode to reposition the addon"] = "애드온 위치 조정을 위해 편집 모드 열기"
 L["Open EditMode to reposition"] = "편집 모드 열기"L["Toggle addon"] = "애드온 전환"
 L["Second Wind Charges"] = "2차 바람 충전"
+L["Show Ability Cooldown Text"] = "능력 재사용 대기시간 텍스트 표시"
+L["Show remaining cooldown time on speed ability"] = "속도 능력의 남은 재사용 대기시간 표시"
 
