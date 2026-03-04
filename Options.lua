@@ -710,6 +710,22 @@ local options = {
                     end,
                 },
 
+                secondWindBarTexture = {
+                    order = nextOrder(),
+                    type = "select",
+                    dialogControl = "LSM30_Statusbar",
+                    name = L["Second Wind Bar Texture"],
+                    desc = L["Texture for the second wind bar"],
+                    values = LibStub("LibSharedMedia-3.0"):HashTable("statusbar"),
+                    get = function(info)
+                        return zSkyridingBar.db.profile.secondWindBarTexture
+                    end,
+                    set = function(info, value)
+                        zSkyridingBar.db.profile.secondWindBarTexture = value
+                        zSkyridingBar:RefreshConfig()
+                    end,
+                },
+
                 spacer_textures = {
                     order = nextOrder(),
                     type = "description",
@@ -1023,6 +1039,7 @@ local options = {
                         zSkyridingBar.db.profile.chargeBarNormalRechargeColor = defaults.chargeBarNormalRechargeColor
                         zSkyridingBar.db.profile.speedBarTexture = defaults.speedBarTexture
                         zSkyridingBar.db.profile.chargeBarTexture = defaults.chargeBarTexture
+                        zSkyridingBar.db.profile.secondWindBarTexture = defaults.secondWindBarTexture
                         zSkyridingBar.db.profile.speedBarBackgroundColor = defaults.speedBarBackgroundColor
                         zSkyridingBar.db.profile.chargeBarBackgroundColor = defaults.chargeBarBackgroundColor
                         zSkyridingBar.db.profile.secondWindNoChargeColor = defaults.secondWindNoChargeColor

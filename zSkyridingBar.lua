@@ -1,17 +1,12 @@
 -- zSkyridingBar - A standalone skyriding information addon
--- REFACTORED: Separate frames for each UI element
 
 -- Initialize Ace addon
 local zSkyridingBar = LibStub("AceAddon-3.0"):NewAddon("zSkyridingBar", "AceTimer-3.0")
 local BuildVersion, BuildBuild, BuildDate, BuildInterface = GetBuildInfo()
 
--- Get localization from AceLocale
 local L = LibStub("AceLocale-3.0"):GetLocale("zSkyridingBar")
-
--- LibEditMode for in-game frame repositioning via EditMode
 local LEM = LibStub("LibEditMode")
 
--- print function that accepts everything normal print would, like args and variables etc. I can  pass multiple args and concatenated strings
 function zSkyridingBar.print(...)
     local args = { ... }
     DEFAULT_CHAT_FRAME:AddMessage("|cff0b808fzSkyridingBar:|r " .. table.concat(args, " "))
@@ -27,8 +22,7 @@ local WHIRLING_SURGE_SPELL_ID = 361584 -- Whirling Surge ability
 local LIGHTNING_RUSH_SPELL_ID = 418592 -- Lightning Rush ability
 local SLOW_SKYRIDING_RATIO = 705 / 830
 local ASCENT_DURATION = 3.5
-local TICK_RATE = 1 / 10 -- How often game state is polled (gliding, show/hide, text, colors, abilities)
-local BAR_TICK_RATE = 1 / 15 -- How often status bar values are pushed (lower = more animation breathing room)
+local BAR_TICK_RATE = 1 / 15 -- seconds per tick for text/color/ability checks
 local BAR_MULTIPLIER = 0.5
 
 -- Second Wind constants
@@ -59,7 +53,6 @@ if BuildInterface <= 110205 then
     UIWidgetPowerBarContainerFrame = UIWidgetPowerBarContainerFrame
 end
 
--- Function to get default texture based on availability
 local function getDefaultTexture()
     local LSM = LibStub("LibSharedMedia-3.0", true)
     if LSM then
@@ -174,81 +167,17 @@ local defaults = {
     }
 }
 
--- Theme definitions
-local THEMES = {
-    classic = {
-        name = "Classic",
-        speedBarHeight = 18,
-        chargeBarHeight = 12,
-        chargeBarSpacing = 2,
-        speedIndicatorHeight = 20,
-        chargeBarTexture = "default",
-        chargeBarBorderSize = 1,
-        chargesBarX = 0,
-        chargesBarY = -5,
-    },
-    thick = {
-        name = "Thick",
-        speedBarHeight = 28,
-        chargeBarHeight = 20,
-        chargeBarSpacing = 0,
-        speedIndicatorHeight = 30,
-        chargeBarTexture = "default",
-        chargeBarBorderSize = 1,
-        chargesBarX = 0,
-        chargesBarY = 0,
-    },
-}
-
-local framevars = {
-    speedBarFrame = {
-    },
-    chargeBarFrame = {
-    },
-    staticChargeFrame = {
-    },
-    secondWindFrame = {
-    },
-    whirlingSurgeFrame = {
-    },
-    masterMoveFrame = {
-    },
-}
-
--- Apply theme settings to profile
-local function applyTheme(themeName)
-    if not themeName or not THEMES[themeName] then
-        themeName = "classic"
-    end
-
-    local theme = THEMES[themeName]
-    local profile = zSkyridingBar.db.profile
-
-    profile.speedBarHeight = theme.speedBarHeight
-    profile.chargeBarHeight = theme.chargeBarHeight
-    profile.chargeBarSpacing = theme.chargeBarSpacing
-    profile.speedIndicatorHeight = theme.speedIndicatorHeight
-    profile.chargesBarX = theme.chargesBarX
-    profile.chargesBarY = theme.chargesBarY
-    profile.chargeBarBorderSize = theme.chargeBarBorderSize
-end
-
--- Local variables
 local active = false
-local updateHandle = nil
-local barUpdateHandle = nil
 local ascentStart = 0
 local isSlowSkyriding = true
 local hasSkyriding = false
 
--- Frame references
 local masterMoveFrame = nil
 local speedBarFrame = nil
 local chargesBarFrame = nil
 local speedAbilityFrame = nil
 local secondWindFrame = nil
 
--- UI element references
 local speedBar = nil
 local speedText = nil
 local angleText = nil
@@ -265,30 +194,41 @@ local chargesInitialized = false
 local secondWindStartTime = 0
 local whirlingSurgeStartTime = 0
 
--- Event-driven caches (avoid per-tick C API table allocations)
-local thrillActive = false          -- synced via UNIT_AURA; eliminates per-tick GetPlayerAuraBySpellID
-local abilityFrameDirty = true      -- set by UNIT_AURA / SPELL_UPDATE_COOLDOWN; gates UpdateStaticChargeAndWhirlingSurge
+local thrillActive = false          -- synced via UNIT_AURA
+local abilityFrameDirty = true      -- set by UNIT_AURA / SPELL_UPDATE_COOLDOWN
+
+local speedBarElapsed    = 0
+local smoothedSpeed      = 0
+local lastSpeedBarColorKey = nil    -- "boost"|"thrill"|"normal"
+
+local vigorRechargeTimer     = nil
+local secondWindRechargeTimer = nil
 
 
 -- Localized functions
 local GetTime = GetTime
 local C_PlayerInfo = C_PlayerInfo
+local GetGlidingInfo = C_PlayerInfo.GetGlidingInfo
 local C_UnitAuras = C_UnitAuras
 
--- Helper: Play sound
 local function playChargeSound(soundId)
     if not soundId or soundId == 0 then return end
     PlaySound(soundId, "Master")
 end
 
--- Helper: Preview charge sound (called from options)
 function zSkyridingBar:PreviewChargeSound()
     if self.db.profile.chargeRefreshSound then
         playChargeSound(self.db.profile.chargeRefreshSoundId)
     end
 end
 
--- Helper: Get font path from LibSharedMedia font name
+local function setBarRechargeTimer(bar, startTime, cooldownDuration, existing)
+    local timer = existing or C_DurationUtil.CreateDuration()
+    timer:SetTimeFromStart(startTime, cooldownDuration)
+    bar:SetTimerDuration(timer)
+    return timer
+end
+
 local function getFontPath(fontName)
     local LSM = LibStub("LibSharedMedia-3.0")
     return LSM:Fetch("font", fontName) or "Fonts\\FRIZQT__.TTF"
@@ -314,12 +254,10 @@ local function snapToNearbyFrames(draggedFrame)
                 draggedFrame:SetPoint("TOPLEFT", otherFrame, "TOPLEFT", x - ox, 0)
                 break
             end
-            -- Add more edge checks as needed (right, bottom, etc.)
         end
     end
 end
 
--- Helper: Update charge bar color
 local function updateChargeBarColor(bar, isFull, isRecharging)
     if not bar then return end
 
@@ -340,8 +278,6 @@ local function updateChargeBarColor(bar, isFull, isRecharging)
     bar:SetStatusBarColor(unpack(color))
 end
 
--- Helper: Draw a 1px black outline on all four edges of a frame.
--- Use instead of four hand-written CreateTexture calls wherever a plain border is needed.
 local function AddBorderLines(frame, size)
     for _, spec in ipairs({
         { "TOPLEFT",    "TOPRIGHT"   },
@@ -362,8 +298,7 @@ local function AddBorderLines(frame, size)
     end
 end
 
--- Helper: Register a frame with LibEditMode in multi-frame mode.
--- Eliminates the identical ~30-line boilerplate in each Create*Frame function.
+-- Registers a frame with LibEditMode (multi-frame mode) and wires up the per-layout scale slider.
 local function RegisterMultiFrameWithLEM(frame, displayName, pointKey, xKey, yKey, scalesKey, defaultPoint, defaultX, defaultY)
     frame.editModeName = displayName
     LEM:AddFrame(frame, function(f, layoutName, point, x, y)
@@ -390,9 +325,47 @@ local function RegisterMultiFrameWithLEM(frame, displayName, pointKey, xKey, yKe
     } })
 end
 
--- Helper: Create a pre-wired alpha-fade AnimationGroup on a texture.
--- The group fades from 1→0 over `duration` seconds.  `onFinished` (optional)
--- runs when the animation completes.
+local function SetupFadeAnimations(frame, inDuration, outDuration)
+    local fadeIn = frame:CreateAnimationGroup()
+    fadeIn:SetToFinalAlpha(true)
+    local fadeInAnim = fadeIn:CreateAnimation("Alpha")
+    fadeInAnim:SetFromAlpha(0)
+    fadeInAnim:SetToAlpha(1)
+    fadeInAnim:SetDuration(inDuration)
+    fadeIn:SetScript("OnPlay", function() frame:Show() end)
+    frame.fadeIn = fadeIn
+
+    local fadeOut = frame:CreateAnimationGroup()
+    fadeOut:SetToFinalAlpha(true)
+    local fadeOutAnim = fadeOut:CreateAnimation("Alpha")
+    fadeOutAnim:SetFromAlpha(1)
+    fadeOutAnim:SetToAlpha(0)
+    fadeOutAnim:SetDuration(outDuration)
+    fadeOut:SetScript("OnFinished", function() frame:Hide() end)
+    frame.fadeOut = fadeOut
+end
+
+local function ShowWithFade(frame)
+    if not frame then return end
+    if frame.fadeOut and frame.fadeOut:IsPlaying() then frame.fadeOut:Stop() end
+    if frame.fadeIn then
+        frame:SetAlpha(0)
+        frame.fadeIn:Play()
+    else
+        frame:Show()
+    end
+end
+
+local function HideWithFade(frame)
+    if not frame then return end
+    if frame.fadeIn and frame.fadeIn:IsPlaying() then frame.fadeIn:Stop() end
+    if frame.fadeOut and frame:IsShown() then
+        frame.fadeOut:Play()
+    else
+        frame:Hide()
+    end
+end
+
 local function CreateFadeAnimGroup(target, duration, onFinished)
     local group = target:CreateAnimationGroup()
     local anim  = group:CreateAnimation("Alpha")
@@ -406,15 +379,8 @@ local function CreateFadeAnimGroup(target, duration, onFinished)
     return group
 end
 
--- Helper: Apply the reverse-fill overlay and trigger the shine when a cooldown expires.
--- Must only be called when speedAbilityFrame is confirmed non-nil (after the early-return guard).
--- Returns true while the fill animation is still in progress (caller assigns to fillActive).
---   startTime     -- cooldownInfo.startTime from C_Spell.GetSpellCooldown
---   duration      -- cooldownInfo.duration
---   icon          -- the icon texture to restore alpha on (and optionally fade out on expiry)
---   iconFadeGroup -- the fade AnimationGroup wired to `icon`
---   fadeIconAlways-- true  = always fade the icon when the cooldown ends (LR-only / WS branches)
---                   false = only fade if no Static Charge stacks remain (SC+LR branch)
+-- Drives the reverse-fill overlay and end-of-cooldown shine on speedAbilityFrame.
+-- Returns true while still animating (keep abilityFrameDirty set while true).
 local function ApplyCooldownFill(startTime, duration, icon, iconFadeGroup, fadeIconAlways)
     local saf = speedAbilityFrame  -- confirmed non-nil by caller
     if not saf.whirlingSurgeReverseFill then
@@ -458,7 +424,6 @@ function zSkyridingBar:OnInitialize()
     self.db = LibStub("AceDB-3.0"):New("zSkyridingBarDB", defaults, "Default")
     self:SeedBuiltinProfiles()
 
-    -- Event frame for event handling
     local eventFrame = CreateFrame("Frame")
     eventFrame:RegisterEvent("ADDON_LOADED")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -468,6 +433,8 @@ function zSkyridingBar:OnInitialize()
     eventFrame:RegisterEvent("UNIT_POWER_UPDATE")
     eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
     eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    eventFrame:RegisterEvent("SPELL_UPDATE_CHARGES")
     if CompatCheck then
         eventFrame:RegisterEvent("UPDATE_UI_WIDGET")
     end
@@ -502,25 +469,28 @@ function zSkyridingBar:OnInitialize()
             end
         elseif event == "SPELL_UPDATE_COOLDOWN" then
             abilityFrameDirty = true
+        elseif event == "ZONE_CHANGED_NEW_AREA" then
+            isSlowSkyriding = not FAST_FLYING_ZONES[select(8, GetInstanceInfo())]
+        elseif event == "SPELL_UPDATE_CHARGES" then
+            if active then
+                zSkyridingBar:UpdateChargeBars()
+                zSkyridingBar:UpdateSecondWind()
+            end
         end
     end)
 
     C_Timer.After(10, function()
         self:CreateAllFrames()
+        -- Reset so StartTracking re-runs now that frames actually exist.
+        active = false
         self:CheckSkyridingAvailability()
     end)
-    --self:CreateAllFrames()
-
     self.db.RegisterCallback(self, "OnProfileChanged", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileCopied", "RefreshConfig")
     self.db.RegisterCallback(self, "OnProfileReset", "RefreshConfig")
 end
 
--- Seed built-in "Classic" and "Thick" profiles on first load if they don't yet exist.
-
--- Preset height/spacing values for each built-in profile.
--- Widths are NOT included — those are always user-adjustable for user profiles,
--- and locked (disabled) for Classic/Thick.
+-- Seed built-in profiles on first load (Classic and Thick only, widths excluded).
 local BUILTIN_PRESETS = {
     Classic = {
         speedBarHeight = 18,
@@ -569,10 +539,8 @@ function zSkyridingBar:SeedBuiltinProfiles()
     self._seeding = false
 end
 
--- Reset the current profile to its canonical defaults.
--- Built-in profiles (Classic / Thick) restore their preset height/spacing values
--- on top of the AceDB defaults, so they always return to the correct layout.
--- User profiles reset to the AceDB defaults (Thick values).
+-- Built-in profiles restore their preset height/spacing on top of AceDB defaults.
+-- User profiles reset to AceDB defaults only.
 function zSkyridingBar:ResetCurrentProfile()
     self.db:ResetProfile()  -- resets everything to AceDB defaults (Thick values)
     local preset = BUILTIN_PRESETS[self.db:GetCurrentProfile()]
@@ -585,7 +553,6 @@ function zSkyridingBar:ResetCurrentProfile()
     zSkyridingBar.print(L["Reset all settings to default."])
 end
 
--- Create a new profile (switches to it immediately).
 function zSkyridingBar:CreateNewProfile(name)
     if not name or name == "" then
         zSkyridingBar.print(L["Profile name cannot be empty"])
@@ -617,7 +584,6 @@ function zSkyridingBar:DeleteCurrentProfile()
     zSkyridingBar.print(L["Profile deleted"] .. ": " .. current)
 end
 
--- Copy the named profile's settings into the current profile.
 function zSkyridingBar:CopyProfile(sourceName)
     if not sourceName or not self.db.profiles[sourceName] then
         zSkyridingBar.print(L["Profile does not exist"])
@@ -681,7 +647,6 @@ function zSkyridingBar:OnDisable()
     active = false
 end
 
--- Helper: Release and hide all UI frames
 local function releaseAllFrames()
     if speedBarFrame then
         speedBarFrame:Hide()
@@ -703,7 +668,6 @@ local function releaseAllFrames()
         masterMoveFrame:Hide()
         masterMoveFrame = nil
     end
-    -- Also clear references to bars and icons
     speedBar = nil
     speedText = nil
     angleText = nil
@@ -791,15 +755,14 @@ end
 
 function zSkyridingBar:RefreshConfig()
     if self._seeding then return end
-    -- Update frame positions and appearance without destroying
-    --self:UpdateFramePositions()
     self:UpdateAllFrameAppearance()
+    -- Re-apply current bar state; SetStatusBarTexture resets fill value to 0
+    self:UpdateSecondWind()
     self:UpdateFonts()
     -- Sync countdown text visibility on the native Cooldown frame
     if speedAbilityFrame and speedAbilityFrame.cooldown then
         speedAbilityFrame.cooldown:SetHideCountdownNumbers(not self.db.profile.showAbilityCooldownText)
     end
-    -- Update default vigor UI visibility
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
             UIWidgetPowerBarContainerFrame:Hide()
@@ -889,7 +852,6 @@ function zSkyridingBar:CreateMasterMoveFrame()
         y = defaults.profile.masterMoveFrameY,
     })
 
-    -- Add a Scale slider to the EditMode dialog for this frame
     LEM:AddFrameSettings(masterMoveFrame, {
         {
             kind = LEM.SettingType.Slider,
@@ -931,7 +893,6 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBarFrame:SetFrameStrata(profile.frameStrata)
     speedBarFrame:SetFrameLevel(10)
 
-    -- Speed bar (status bar)
     speedBar = CreateFrame("StatusBar", nil, speedBarFrame)
     speedBar:SetSize(self.db.profile.speedBarWidth, self.db.profile.speedBarHeight)
     speedBar:SetPoint("TOP", speedBarFrame, "TOP", 0, 0)
@@ -944,7 +905,6 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBar:SetValue(0)
     speedBar:SetClipsChildren(true)
 
-    -- Background
     local speedBarBG = speedBar:CreateTexture(nil, "BACKGROUND")
     speedBarBG:SetAllPoints()
     speedBarBG:SetTexture(speedTexture)
@@ -952,22 +912,20 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBar.bg = speedBarBG
 
     AddBorderLines(speedBar, 1)
+    SetupFadeAnimations(speedBarFrame, 0.3, 0.8)
 
-    -- Speed text
     speedText = speedBar:CreateFontString(nil, "OVERLAY")
     speedText:SetFont(getFontPath(self.db.profile.fontFace), self.db.profile.fontSize, self.db.profile.fontFlag)
     speedText:SetPoint("LEFT", speedBar, "LEFT", 5, 0)
     speedText:SetTextColor(unpack(self.db.profile.fontColor))
     speedText:SetText("")
 
-    -- Angle text
     angleText = speedBar:CreateFontString(nil, "OVERLAY")
     angleText:SetFont(getFontPath(self.db.profile.fontFace), self.db.profile.fontSize, self.db.profile.fontFlag)
     angleText:SetPoint("RIGHT", speedBar, "RIGHT", -5, 0)
     angleText:SetTextColor(unpack(self.db.profile.fontColor))
     angleText:SetText("")
 
-    -- Speed indicator
     if self.db.profile.showSpeedIndicator then
         local speedIndicator = speedBar:CreateTexture(nil, "OVERLAY", nil, -1)
         speedIndicator:SetTexture("Interface\\Buttons\\WHITE8x8")
@@ -1027,7 +985,6 @@ function zSkyridingBar:CreateChargesBarFrame()
         bar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
         bar:SetValue(0)
 
-        -- Background
         local bg = bar:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetTexture(chargeTexture)
@@ -1041,6 +998,7 @@ function zSkyridingBar:CreateChargesBarFrame()
         bar:Hide()
     end
 
+    SetupFadeAnimations(chargesBarFrame, 0.3, 0.8)
     chargesBarFrame:Hide()
 end
 
@@ -1069,7 +1027,7 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     staticChargeIcon:SetPoint("CENTER", speedAbilityFrame, "CENTER", 0, 0)
     staticChargeIcon:Hide()
 
-    -- Icon for Whirling Surge (separate texture for unified frame display)
+    -- Whirling Surge icon (shares frame with Static Charge)
     whirlingSurgeIcon = speedAbilityFrame:CreateTexture(nil, "ARTWORK")
     whirlingSurgeIcon:SetSize(36, 36)
     whirlingSurgeIcon:SetPoint("CENTER", speedAbilityFrame, "CENTER", 0, 0)
@@ -1086,7 +1044,6 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     whirlingSurgeReverseFill:Hide()
     speedAbilityFrame.whirlingSurgeReverseFill = whirlingSurgeReverseFill
 
-    -- Whirling Surge shine overlay (must be after speedAbilityFrame is initialized)
     local whirlingSurgeShine = speedAbilityFrame:CreateTexture(nil, "OVERLAY")
     whirlingSurgeShine:SetTexture("Interface\\Cooldown\\star4")
     whirlingSurgeShine:SetBlendMode("ADD")
@@ -1095,14 +1052,12 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     whirlingSurgeShine:SetAlpha(0)
     speedAbilityFrame.whirlingSurgeShine = whirlingSurgeShine
 
-    -- Shine rotation animation
     local shineAnimGroup = whirlingSurgeShine:CreateAnimationGroup()
     local shineRotation = shineAnimGroup:CreateAnimation("Rotation")
     shineRotation:SetDuration(1.5)
     shineRotation:SetDegrees(320)
     speedAbilityFrame.whirlingSurgeShineAnimGroup = shineAnimGroup
 
-    -- Pre-create reusable fade animation groups (created once; reused with Stop/Play to avoid per-tick allocation)
     speedAbilityFrame.shineFadeAnimGroup = CreateFadeAnimGroup(whirlingSurgeShine, 1, function()
         if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
             speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
@@ -1119,7 +1074,6 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     staticChargeBorder:Hide()
     speedAbilityFrame.border = staticChargeBorder
 
-    -- Pre-create reusable icon fade animation groups
     speedAbilityFrame.staticChargeIconFadeAnimGroup = CreateFadeAnimGroup(staticChargeIcon, 1, function()
         staticChargeIcon:SetAlpha(0)
         staticChargeIcon:Hide()
@@ -1130,7 +1084,6 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
         whirlingSurgeIcon:Hide()
     end)
 
-    -- Stack count text
     staticChargeText = speedAbilityFrame:CreateFontString(nil, "OVERLAY")
     staticChargeText:SetFont(getFontPath(self.db.profile.fontFace), 14, self.db.profile.fontFlag)
     staticChargeText:SetPoint("BOTTOM", staticChargeIcon, "BOTTOM", 0, -5)
@@ -1144,7 +1097,7 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     cooldownFrame:SetDrawSwipe(false)   -- we use our own reverse-fill overlay
     cooldownFrame:SetDrawEdge(false)
     cooldownFrame:SetHideCountdownNumbers(not self.db.profile.showAbilityCooldownText)
-    -- Fire an ability-frame re-evaluation when a cooldown expires naturally (mirrors Falcon's approach)
+    -- Fire an ability-frame re-evaluation when a cooldown expires naturally
     cooldownFrame:HookScript("OnCooldownDone", function()
         abilityFrameDirty = true
         zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
@@ -1173,7 +1126,6 @@ function zSkyridingBar:CreateSecondWindFrame()
     secondWindFrame:SetFrameStrata(profile.frameStrata)
     secondWindFrame:SetFrameLevel(10)
 
-    -- Second Wind bar (status bar for the single charge display)
     secondWindBar = CreateFrame("StatusBar", nil, secondWindFrame)
     secondWindBar:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
     secondWindBar:SetPoint("TOP", secondWindFrame, "TOP", 0, 0)
@@ -1188,20 +1140,19 @@ function zSkyridingBar:CreateSecondWindFrame()
     AddBorderLines(secondWindBar, 1)
 
 
-    -- Background
     local secondWindBG = secondWindBar:CreateTexture(nil, "BACKGROUND")
     secondWindBG:SetAllPoints()
     secondWindBG:SetTexture(secondWindTexture)
     secondWindBG:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
     secondWindBar.bg = secondWindBG
 
-    -- Charge count text (centered)
     secondWindText = secondWindBar:CreateFontString(nil, "OVERLAY")
     secondWindText:SetFont(getFontPath(self.db.profile.fontFace), self.db.profile.fontSize, self.db.profile.fontFlag)
     secondWindText:SetPoint("CENTER", secondWindBar, "CENTER", 0, 0)
     secondWindText:SetTextColor(unpack(self.db.profile.fontColor))
     secondWindText:SetText("0/3")
 
+    SetupFadeAnimations(secondWindFrame, 0.3, 0.8)
     secondWindFrame:Hide()
 end
 
@@ -1253,7 +1204,6 @@ function zSkyridingBar:UpdateChargesBarAppearance()
         chargeFrame:SetSize(self.db.profile.chargeBarWidth, self.db.profile.chargeBarHeight)
     end
 
-    -- Recalculate bar widths and spacing
     local numBars = #chargeFrame.bars
     local barWidth = (self.db.profile.chargeBarWidth - ((numBars - 1) * self.db.profile.chargeBarSpacing)) / numBars
 
@@ -1261,33 +1211,26 @@ function zSkyridingBar:UpdateChargesBarAppearance()
         "Interface\\TargetingFrame\\UI-StatusBar"
 
     for i, bar in ipairs(chargeFrame.bars) do
-        -- Update size
         bar:SetSize(barWidth, self.db.profile.chargeBarHeight)
 
-        -- Reposition with proper spacing
         if i == 1 then
             bar:SetPoint("LEFT", chargeFrame, "LEFT", 0, 0)
         else
             bar:SetPoint("LEFT", chargeFrame.bars[i - 1], "RIGHT", self.db.profile.chargeBarSpacing, 0)
         end
 
-        -- Update texture
         bar:SetStatusBarTexture(chargeTexture)
 
-        -- Update background
         if bar.bg then
             bar.bg:SetTexture(chargeTexture)
             bar.bg:SetVertexColor(unpack(self.db.profile.chargeBarBackgroundColor))
         end
-        -- Update borders
         local borderTextures = bar:GetRegions()
         for _, texture in ipairs({ borderTextures }) do
             if texture and texture:GetObjectType() == "Texture" and texture:GetDrawLayer() == "OVERLAY" then
-                -- This is a border texture
                 local height = texture:GetHeight()
                 local width = texture:GetWidth()
                 if height == 1 or width == 1 then
-                    -- This is a border line
                     if height == 1 then
                         texture:SetHeight(self.db.profile.chargeBarBorderSize or 0)
                     else
@@ -1296,7 +1239,6 @@ function zSkyridingBar:UpdateChargesBarAppearance()
                 end
             end
         end
-        -- Update color based on current state
         local isFull = (i <= previousChargeCount)
         local isRecharging = (i == previousChargeCount + 1)
         updateChargeBarColor(bar, isFull, isRecharging)
@@ -1310,7 +1252,7 @@ function zSkyridingBar:UpdateSecondWindBarAppearance()
         secondWindFrame:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
     end
     secondWindBar:SetSize(self.db.profile.secondWindBarWidth, self.db.profile.secondWindBarHeight)
-    local secondWindTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.speedBarTexture) or
+    local secondWindTexture = LibStub("LibSharedMedia-3.0"):Fetch("statusbar", self.db.profile.secondWindBarTexture) or
         "Interface\\TargetingFrame\\UI-StatusBar"
     secondWindBar:SetStatusBarTexture(secondWindTexture)
     secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindNoChargeColor))
@@ -1355,6 +1297,7 @@ function zSkyridingBar:OnAddonLoaded()
 end
 
 function zSkyridingBar:OnPlayerEnteringWorld()
+    isSlowSkyriding = not FAST_FLYING_ZONES[select(8, GetInstanceInfo())]
     self:CheckSkyridingAvailability()
 end
 
@@ -1389,8 +1332,83 @@ function zSkyridingBar:OnSpellcastSucceeded(event, unitTarget, castGUID, spellId
     end
 end
 
+-- OnUpdate handler attached to the speed bar frame while skyriding; detached on dismount.
+-- The speed bar value is eased every frame for fluid animation. Text, color, and ability
+-- frame checks are throttled at BAR_TICK_RATE since they don't benefit from per-frame updates.
+local function speedBarOnUpdate(_, elapsed)
+    local isGliding, isFlying, forwardSpeed = GetGlidingInfo()
+    if not isGliding and not isFlying then
+        -- Not gliding/flying: ensure we stop tracking in cases where the
+        -- PLAYER_CAN_GLIDE_CHANGED event may not have fired (eg. ridealong
+        -- passenger dismounts). Re-check availability to trigger StopTracking().
+        zSkyridingBar:CheckSkyridingAvailability()
+        return
+    end
+
+    -- Ease displayed speed toward actual speed each frame (frame-rate independent).
+    -- Factor derived from: desired half-life of ~4 frames at 60 fps.
+    local easeT = 1.0 - 0.82 ^ (elapsed * 60)
+    smoothedSpeed = smoothedSpeed + (forwardSpeed - smoothedSpeed) * easeT
+    local adjustedSpeed = smoothedSpeed
+    if isSlowSkyriding then
+        adjustedSpeed = adjustedSpeed / SLOW_SKYRIDING_RATIO
+    end
+    speedBar:SetValue(math.min(100, math.max(20, adjustedSpeed)) * BAR_MULTIPLIER)
+
+    -- Throttled: text, color, ability frame (no need to run every frame)
+    speedBarElapsed = speedBarElapsed + elapsed
+    if speedBarElapsed < BAR_TICK_RATE then return end
+    speedBarElapsed = 0
+
+    -- Speed text (change-gated)
+    if speedText and zSkyridingBar.db.profile.speedShow then
+        local speedTextFormat, speedTextFactor
+        if zSkyridingBar.db.profile.speedUnits == 1 then
+            speedTextFormat = "%.1fyd/s"
+            speedTextFactor = 1
+        else
+            speedTextFormat = "%.0f%%"
+            speedTextFactor = 100 / 7
+        end
+        local speedDisplay = forwardSpeed < 1 and "" or string.format(speedTextFormat, forwardSpeed * speedTextFactor)
+        if speedDisplay ~= speedText:GetText() then
+            speedText:SetText(speedDisplay)
+        end
+    end
+
+    -- Speed bar color (change-gated via colorKey)
+    do
+        local maxGlideSpeed = isSlowSkyriding and SLOW_ZONE_MAX_GLIDE or FAST_ZONE_MAX_GLIDE
+        local colorKey
+        if forwardSpeed > (maxGlideSpeed + 0.1) then
+            colorKey = "boost"
+        elseif thrillActive then
+            colorKey = "thrill"
+        else
+            colorKey = "normal"
+        end
+        if colorKey ~= lastSpeedBarColorKey then
+            lastSpeedBarColorKey = colorKey
+            local color
+            if colorKey == "boost" then
+                color = zSkyridingBar.db.profile.speedBarBoostColor
+            elseif colorKey == "thrill" then
+                color = zSkyridingBar.db.profile.speedBarThrillColor
+            else
+                color = zSkyridingBar.db.profile.speedBarNormalColor
+            end
+            speedBar:SetStatusBarColor(unpack(color))
+        end
+    end
+
+    -- Ability frame (only when dirty)
+    if abilityFrameDirty then
+        zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
+    end
+end
+
 function zSkyridingBar:CheckSkyridingAvailability()
-    local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
+    local isGliding, isFlying, forwardSpeed = GetGlidingInfo()
     if not isGliding and not isFlying then
         hasSkyriding = false
     else
@@ -1411,39 +1429,42 @@ function zSkyridingBar:CheckSkyridingAvailability()
 end
 
 function zSkyridingBar:StartTracking()
-    if not updateHandle then
-        active = true
-        updateHandle = self:ScheduleRepeatingTimer("UpdateTracking", TICK_RATE)
-        barUpdateHandle = self:ScheduleRepeatingTimer("UpdateBarValues", BAR_TICK_RATE)
+    active = true
 
-        if speedBarFrame then
-            if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else speedBarFrame:Show() end
-        end
-        if speedBar then speedBar:Show() end
-        if chargesBarFrame then
-            if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
-        end
-        -- Do NOT pre-show speedAbilityFrame here.
-        -- UpdateStaticChargeAndWhirlingSurge (called below) owns its visibility entirely.
-        -- Pre-showing it would cause the stale Cooldown child frame to flash for one render frame.
-        if speedAbilityFrame then
-            if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() end
-        end
-        if secondWindFrame then
-            if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
-        end
-        if secondWindBar then
-            if self.db.profile.hideSecondWindBar then secondWindBar:Hide() else secondWindBar:Show() end
-        end
-
-        -- Sync event-driven caches before first tick
-        local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
-        thrillActive = thrill ~= nil
-        abilityFrameDirty = true   -- ensure initial ability frame check runs this tick
-        self:UpdateChargeBars()
-        self:UpdateStaticChargeAndWhirlingSurge()
-        self:UpdateSecondWind()
+    if speedBar then
+        speedBarElapsed = 0
+        smoothedSpeed = 0
+        lastSpeedBarColorKey = nil
+        speedBar:SetScript("OnUpdate", speedBarOnUpdate)
     end
+
+    if speedBarFrame then
+        if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else ShowWithFade(speedBarFrame) end
+    end
+    if speedBar then speedBar:Show() end
+    if chargesBarFrame then
+        if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else ShowWithFade(chargesBarFrame) end
+    end
+    -- Do NOT pre-show speedAbilityFrame here.
+    -- UpdateStaticChargeAndWhirlingSurge (called below) owns its visibility entirely.
+    -- Pre-showing it would cause the stale Cooldown child frame to flash for one render frame.
+    if speedAbilityFrame then
+        if self.db.profile.hideSpeedAbility then speedAbilityFrame:Hide() end
+    end
+    if secondWindFrame then
+        if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else ShowWithFade(secondWindFrame) end
+    end
+    if secondWindBar then
+        if self.db.profile.hideSecondWindBar then secondWindBar:Hide() else secondWindBar:Show() end
+    end
+
+    -- Sync event-driven caches before first tick
+    local thrill = C_UnitAuras.GetPlayerAuraBySpellID(THRILL_BUFF_ID)
+    thrillActive = thrill ~= nil
+    abilityFrameDirty = true   -- ensure initial ability frame check runs this tick
+    self:UpdateChargeBars()
+    self:UpdateStaticChargeAndWhirlingSurge()
+    self:UpdateSecondWind()
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
             UIWidgetPowerBarContainerFrame:Hide()
@@ -1452,20 +1473,18 @@ function zSkyridingBar:StartTracking()
 end
 
 function zSkyridingBar:StopTracking()
-    if updateHandle then
-        self:CancelTimer(updateHandle)
-        updateHandle = nil
+    if speedBar then
+        speedBar:SetScript("OnUpdate", nil)
     end
-    if barUpdateHandle then
-        self:CancelTimer(barUpdateHandle)
-        barUpdateHandle = nil
-    end
+    speedBarElapsed = 0
+    smoothedSpeed = 0
+    lastSpeedBarColorKey = nil
 
     previousChargeCount = 0
     chargesInitialized = false
 
-    if speedBarFrame and not LEM:IsInEditMode() then speedBarFrame:Hide() end
-    if chargesBarFrame and not LEM:IsInEditMode() then chargesBarFrame:Hide() end
+    if speedBarFrame and not LEM:IsInEditMode() then HideWithFade(speedBarFrame) end
+    if chargesBarFrame and not LEM:IsInEditMode() then HideWithFade(chargesBarFrame) end
     if speedAbilityFrame and not LEM:IsInEditMode() then
         -- Wipe stale cooldown data so it cannot flash when the frame is next shown on remount
         if speedAbilityFrame.cooldown then
@@ -1479,121 +1498,9 @@ function zSkyridingBar:StopTracking()
         if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
         speedAbilityFrame:Hide()
     end
-    if secondWindFrame and not LEM:IsInEditMode() then secondWindFrame:Hide() end
+    if secondWindFrame and not LEM:IsInEditMode() then HideWithFade(secondWindFrame) end
     if CompatCheck then
         if UIWidgetPowerBarContainerFrame then UIWidgetPowerBarContainerFrame:Show() end
-    end
-end
-
-function zSkyridingBar:UpdateTracking()
-    if not active then
-        self:CheckSkyridingAvailability()
-        if not active then
-            return
-        end
-    end
-
-    if not speedBar then return end
-    if CompatCheck then
-        if UIWidgetPowerBarContainerFrame and UIWidgetPowerBarContainerFrame:IsVisible() then
-            UIWidgetPowerBarContainerFrame:Hide()
-        end
-    end
-
-    isSlowSkyriding = not FAST_FLYING_ZONES[select(8, GetInstanceInfo())]
-
-    local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
-
-    if not isGliding and not isFlying then
-        if LEM:IsInEditMode() then return end
-        if speedBar then speedBar:Hide() end
-        if speedBarFrame then speedBarFrame:Hide() end
-        if chargesBarFrame then chargesBarFrame:Hide() end
-        if chargeFrame then chargeFrame:Hide() end
-        if speedAbilityFrame then speedAbilityFrame:Hide() end
-        if staticChargeIcon then staticChargeIcon:Hide() end
-        if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
-        if secondWindBar then secondWindBar:Hide() end
-        if secondWindFrame then secondWindFrame:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-            speedAbilityFrame.whirlingSurgeReverseFill:Hide()
-        end
-        return
-    else
-        if speedBar then speedBar:Show() end
-        if speedBarFrame then
-            if self.db.profile.hideSpeedBar then speedBarFrame:Hide() else speedBarFrame:Show() end
-        end
-        if chargesBarFrame then
-            if self.db.profile.hideChargeBar then chargesBarFrame:Hide() else chargesBarFrame:Show() end
-        end
-        if chargeFrame then
-            if self.db.profile.hideChargeBar then chargeFrame:Hide() else chargeFrame:Show() end
-        end
-        if secondWindFrame then
-            if self.db.profile.hideSecondWindBar then secondWindFrame:Hide() else secondWindFrame:Show() end
-        end
-        if secondWindBar then
-            if self.db.profile.hideSecondWindBar then secondWindBar:Hide() else secondWindBar:Show() end
-        end
-    end
-
-    local adjustedSpeed = forwardSpeed
-    if isSlowSkyriding then
-        adjustedSpeed = adjustedSpeed / SLOW_SKYRIDING_RATIO
-    end
-
-    if speedText and self.db.profile.speedShow then
-        local speedTextFormat, speedTextFactor = "", 1
-        if self.db.profile.speedUnits == 1 then
-            speedTextFormat = "%.1fyd/s"
-        else
-            speedTextFormat = "%.0f%%"
-            speedTextFactor = 100 / 7
-        end
-
-        local speedDisplay = forwardSpeed < 1 and "" or string.format(speedTextFormat, forwardSpeed * speedTextFactor)
-        if speedDisplay ~= speedText:GetText() then
-            speedText:SetText(speedDisplay)
-        end
-    end
-
-    self:UpdatespeedBarNormalColors(forwardSpeed)
-
-    if abilityFrameDirty then
-        self:UpdateStaticChargeAndWhirlingSurge()
-    end
-end
-
-function zSkyridingBar:UpdateBarValues()
-    if not active or not speedBar then return end
-
-    local isGliding, isFlying, forwardSpeed = C_PlayerInfo.GetGlidingInfo()
-    if not isGliding and not isFlying then return end
-
-    local adjustedSpeed = forwardSpeed
-    if isSlowSkyriding then
-        adjustedSpeed = adjustedSpeed / SLOW_SKYRIDING_RATIO
-    end
-
-    speedBar:SetValue(math.min(100, math.max(20, adjustedSpeed)) * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
-
-    self:UpdateChargeBars()
-    self:UpdateSecondWind()
-end
-
-function zSkyridingBar:UpdatespeedBarNormalColors(currentSpeed)
-    if not speedBar then return end
-
-    local maxGlideSpeed = isSlowSkyriding and SLOW_ZONE_MAX_GLIDE or FAST_ZONE_MAX_GLIDE
-    local inFastMode = currentSpeed and currentSpeed > (maxGlideSpeed + 0.1) or false
-
-    if inFastMode then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarBoostColor))
-    elseif thrillActive then
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarThrillColor))
-    else
-        speedBar:SetStatusBarColor(unpack(self.db.profile.speedBarNormalColor))
     end
 end
 
@@ -1610,7 +1517,6 @@ if CompatCheck then
             return
         end
 
-        -- Hide all bars first
         for i = 1, 6 do
             local bar = chargeFrame.bars[i]
             if bar then
@@ -1618,21 +1524,19 @@ if CompatCheck then
             end
         end
 
-        -- Update bars based on widget data
         for i = 1, math.min(widgetData.numTotalFrames, 6) do
             local bar = chargeFrame.bars[i]
             if bar then
                 bar:Show()
 
-                -- Set up the bar range (0-100 for percentage-like display)
                 bar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
 
                 if widgetData.numFullFrames >= i then
-                    -- Full charge - instantly fill to 100%
+                    -- full charge
                     updateChargeBarColor(bar, true, false)
                     bar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                 elseif widgetData.numFullFrames + 1 == i then
-                    -- Currently regenerating charge - show smooth progress
+                    -- recharging
                     local progress = 0
                     if widgetData.fillMax > widgetData.fillMin then
                         progress = ((widgetData.fillValue - widgetData.fillMin) / (widgetData.fillMax - widgetData.fillMin)) * 100
@@ -1681,10 +1585,9 @@ function zSkyridingBar:UpdateChargeBars()
                     bar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
                     bar:GetStatusBarTexture():SetAlpha(1)
                 elseif i == charges + 1 and start and duration and duration > 0 then
-                    local elapsed = GetTime() - start
-                    local progress = math.min(100, (elapsed / duration) * 100)
                     updateChargeBarColor(bar, false, true)
-                    bar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
+                    bar:SetMinMaxValues(0, 1)
+                    vigorRechargeTimer = setBarRechargeTimer(bar, start, duration, vigorRechargeTimer)
                     bar:GetStatusBarTexture():SetAlpha(1)
                 else
                     updateChargeBarColor(bar, false, false)
@@ -1710,7 +1613,7 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
     abilityFrameDirty = false  -- cleared each call; set true below only if fill animation still in progress
     local fillActive = false   -- tracks whether a cooldown fill needs another tick
 
-    local isGliding, isFlying = C_PlayerInfo.GetGlidingInfo()
+    local isGliding, isFlying = GetGlidingInfo()
     if not isGliding and not isFlying then
         speedAbilityFrame:Hide()
         speedAbilityFrame.whirlingSurgeReverseFill:Hide()
@@ -1848,39 +1751,30 @@ function zSkyridingBar:UpdateSecondWind()
             secondWindBar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
             secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindThreeChargeColor))
         elseif charges > 0 and charges < maxCharges then
-            -- Has some charges, show progress of next recharge
+            -- Partial charges: fill bar shows progress toward the next recharge
+            secondWindBar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
             if start and duration and duration > 0 then
-                local elapsed = GetTime() - start
-                local progress = math.min(100, (elapsed / duration) * 100)
-                secondWindBar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
-                if charges == 0 then
-                    secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindOneChargeColor))
-                    secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
-                elseif charges == 1 then
-                    secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindTwoChargeColor))
-                    secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindOneChargeColor))
-                else
-                    secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindThreeChargeColor))
-                    secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindTwoChargeColor))
-                end
+                secondWindRechargeTimer = setBarRechargeTimer(secondWindBar, start, duration, secondWindRechargeTimer)
             else
-                secondWindBar:SetValue(100 * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
+                secondWindBar:SetValue(100 * BAR_MULTIPLIER)
+            end
+            if charges == 1 then
+                secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindTwoChargeColor))
+                secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindOneChargeColor))
+            else
                 secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindThreeChargeColor))
                 secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindTwoChargeColor))
             end
         else
-            -- No charges, show cooldown
+            -- No charges: fill bar shows progress toward the first recharge
+            secondWindBar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
             if start and duration and duration > 0 then
-                local elapsed = GetTime() - start
-                local progress = math.min(100, (elapsed / duration) * 100)
-                secondWindBar:SetValue(progress * BAR_MULTIPLIER, Enum.StatusBarInterpolation.ExponentialEaseOut)
-                secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindOneChargeColor))
-                secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
+                secondWindRechargeTimer = setBarRechargeTimer(secondWindBar, start, duration, secondWindRechargeTimer)
             else
-                secondWindBar:SetValue(0, Enum.StatusBarInterpolation.ExponentialEaseOut)
-                secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindNoChargeColor))
-                secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
+                secondWindBar:SetValue(0)
             end
+            secondWindBar:SetStatusBarColor(unpack(self.db.profile.secondWindOneChargeColor))
+            secondWindBar.bg:SetVertexColor(unpack(self.db.profile.secondWindNoChargeColor))
         end
 
         if secondWindText then
