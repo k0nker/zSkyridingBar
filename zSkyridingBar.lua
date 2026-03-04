@@ -340,6 +340,117 @@ local function updateChargeBarColor(bar, isFull, isRecharging)
     bar:SetStatusBarColor(unpack(color))
 end
 
+-- Helper: Draw a 1px black outline on all four edges of a frame.
+-- Use instead of four hand-written CreateTexture calls wherever a plain border is needed.
+local function AddBorderLines(frame, size)
+    for _, spec in ipairs({
+        { "TOPLEFT",    "TOPRIGHT"   },
+        { "BOTTOMLEFT", "BOTTOMRIGHT"},
+        { "TOPLEFT",    "BOTTOMLEFT" },
+        { "TOPRIGHT",   "BOTTOMRIGHT"},
+    }) do
+        local line = frame:CreateTexture(nil, "OVERLAY")
+        line:SetColorTexture(0, 0, 0, 1)
+        line:SetPoint(spec[1], frame, spec[1], 0, 0)
+        line:SetPoint(spec[2], frame, spec[2], 0, 0)
+        -- Top/bottom edges: constrain height; left/right edges: constrain width.
+        if spec[1]:find("LEFT") and spec[2]:find("RIGHT") then
+            line:SetHeight(size)
+        else
+            line:SetWidth(size)
+        end
+    end
+end
+
+-- Helper: Register a frame with LibEditMode in multi-frame mode.
+-- Eliminates the identical ~30-line boilerplate in each Create*Frame function.
+local function RegisterMultiFrameWithLEM(frame, displayName, pointKey, xKey, yKey, scalesKey, defaultPoint, defaultX, defaultY)
+    frame.editModeName = displayName
+    LEM:AddFrame(frame, function(f, layoutName, point, x, y)
+        zSkyridingBar.db.profile[pointKey] = point
+        zSkyridingBar.db.profile[xKey]     = x
+        zSkyridingBar.db.profile[yKey]     = y
+    end, { point = defaultPoint, x = defaultX, y = defaultY })
+    local activeLayout = LEM:GetActiveLayoutName()
+    frame:SetScale((activeLayout and zSkyridingBar.db.profile[scalesKey][activeLayout]) or 1.0)
+    LEM:AddFrameSettings(frame, { {
+        kind      = LEM.SettingType.Slider,
+        name      = L["Scale"],
+        default   = 1.0,
+        minValue  = 0.5,
+        maxValue  = 3.0,
+        valueStep = 0.05,
+        get = function(layoutName)
+            return zSkyridingBar.db.profile[scalesKey][layoutName] or 1.0
+        end,
+        set = function(layoutName, value)
+            zSkyridingBar.db.profile[scalesKey][layoutName] = value
+            frame:SetScale(value)
+        end,
+    } })
+end
+
+-- Helper: Create a pre-wired alpha-fade AnimationGroup on a texture.
+-- The group fades from 1→0 over `duration` seconds.  `onFinished` (optional)
+-- runs when the animation completes.
+local function CreateFadeAnimGroup(target, duration, onFinished)
+    local group = target:CreateAnimationGroup()
+    local anim  = group:CreateAnimation("Alpha")
+    anim:SetDuration(duration)
+    anim:SetFromAlpha(1)
+    anim:SetToAlpha(0)
+    anim:SetOrder(1)
+    if onFinished then
+        group:SetScript("OnFinished", onFinished)
+    end
+    return group
+end
+
+-- Helper: Apply the reverse-fill overlay and trigger the shine when a cooldown expires.
+-- Must only be called when speedAbilityFrame is confirmed non-nil (after the early-return guard).
+-- Returns true while the fill animation is still in progress (caller assigns to fillActive).
+--   startTime     -- cooldownInfo.startTime from C_Spell.GetSpellCooldown
+--   duration      -- cooldownInfo.duration
+--   icon          -- the icon texture to restore alpha on (and optionally fade out on expiry)
+--   iconFadeGroup -- the fade AnimationGroup wired to `icon`
+--   fadeIconAlways-- true  = always fade the icon when the cooldown ends (LR-only / WS branches)
+--                   false = only fade if no Static Charge stacks remain (SC+LR branch)
+local function ApplyCooldownFill(startTime, duration, icon, iconFadeGroup, fadeIconAlways)
+    local saf = speedAbilityFrame  -- confirmed non-nil by caller
+    if not saf.whirlingSurgeReverseFill then
+        saf._shineActive = false
+        return false
+    end
+    saf.cooldown:SetCooldown(startTime, duration)
+    saf.cooldown:Show()
+    local now = GetTime()
+    local progress   = math.min(1, math.max(0, (now - startTime) / duration))
+    local fillHeight = 36 * (1 - progress)
+    saf.whirlingSurgeReverseFill:SetHeight(fillHeight)
+    saf.whirlingSurgeReverseFill:Show()
+    if fillHeight <= 1 and not saf._shineActive then
+        saf._shineActive = true
+        saf.whirlingSurgeShine:SetAlpha(1)
+        if icon then icon:SetAlpha(1) end
+        saf.whirlingSurgeShineAnimGroup:Play()
+        saf.shineFadeAnimGroup:Stop()
+        saf.shineFadeAnimGroup:Play()
+        local doFade = fadeIconAlways
+        if not doFade then
+            -- Only fade the icon if no Static Charge stacks remain (SC+LR branch)
+            local sc = C_UnitAuras.GetPlayerAuraBySpellID(STATIC_CHARGE_BUFF_ID)
+            doFade = not sc or (sc.applications or 0) == 0
+        end
+        if doFade and iconFadeGroup then
+            iconFadeGroup:Stop()
+            iconFadeGroup:Play()
+        end
+        C_Timer.After(1, function()
+            if speedAbilityFrame then speedAbilityFrame._shineActive = false end
+        end)
+    end
+    return fillHeight > 1
+end
 
 
 -- Addon lifecycle
@@ -810,29 +921,11 @@ function zSkyridingBar:CreateSpeedBarFrame()
         speedBarFrame = CreateFrame("Frame", nil, UIParent)
         local pt = profile.multiSpeedBarPoint or "CENTER"
         speedBarFrame:SetPoint(pt, UIParent, pt, profile.multiSpeedBarX, profile.multiSpeedBarY)
-        speedBarFrame.editModeName = "zSkyridingBar - Speed Bar"
-        LEM:AddFrame(speedBarFrame, function(frame, layoutName, point, x, y)
-            zSkyridingBar.db.profile.multiSpeedBarPoint = point
-            zSkyridingBar.db.profile.multiSpeedBarX = x
-            zSkyridingBar.db.profile.multiSpeedBarY = y
-        end, { point = defaults.profile.multiSpeedBarPoint, x = defaults.profile.multiSpeedBarX, y = defaults.profile.multiSpeedBarY })
-        local activeLayout = LEM:GetActiveLayoutName()
-        speedBarFrame:SetScale((activeLayout and profile.multiSpeedBarScales[activeLayout]) or 1.0)
-        LEM:AddFrameSettings(speedBarFrame, { {
-            kind = LEM.SettingType.Slider,
-            name = L["Scale"],
-            default = 1.0,
-            minValue = 0.5,
-            maxValue = 3.0,
-            valueStep = 0.05,
-            get = function(layoutName)
-                return zSkyridingBar.db.profile.multiSpeedBarScales[layoutName] or 1.0
-            end,
-            set = function(layoutName, value)
-                zSkyridingBar.db.profile.multiSpeedBarScales[layoutName] = value
-                if speedBarFrame then speedBarFrame:SetScale(value) end
-            end,
-        } })
+        RegisterMultiFrameWithLEM(speedBarFrame,
+            "zSkyridingBar - Speed Bar",
+            "multiSpeedBarPoint", "multiSpeedBarX", "multiSpeedBarY",
+            "multiSpeedBarScales",
+            defaults.profile.multiSpeedBarPoint, defaults.profile.multiSpeedBarX, defaults.profile.multiSpeedBarY)
     end
     speedBarFrame:SetSize(profile.speedBarWidth, profile.speedBarHeight)
     speedBarFrame:SetFrameStrata(profile.frameStrata)
@@ -858,43 +951,7 @@ function zSkyridingBar:CreateSpeedBarFrame()
     speedBarBG:SetVertexColor(unpack(self.db.profile.speedBarBackgroundColor))
     speedBar.bg = speedBarBG
 
-    -- Borders (for classic theme)
-    local borders = {}
-
-    local topLine = speedBar:CreateTexture(nil, "OVERLAY")
-    topLine:SetColorTexture(0, 0, 0, 1)
-    topLine:SetPoint("TOPLEFT", speedBar, "TOPLEFT", 0, 0)
-    topLine:SetPoint("TOPRIGHT", speedBar, "TOPRIGHT", 0, 0)
-    topLine:SetHeight(1)
-    table.insert(borders, topLine)
-
-    local bottomLine = speedBar:CreateTexture(nil, "OVERLAY")
-    bottomLine:SetColorTexture(0, 0, 0, 1)
-    bottomLine:SetPoint("BOTTOMLEFT", speedBar, "BOTTOMLEFT", 0, 0)
-    bottomLine:SetPoint("BOTTOMRIGHT", speedBar, "BOTTOMRIGHT", 0, 0)
-    bottomLine:SetHeight(1)
-    table.insert(borders, bottomLine)
-
-    local leftLine = speedBar:CreateTexture(nil, "OVERLAY")
-    leftLine:SetColorTexture(0, 0, 0, 1)
-    leftLine:SetPoint("TOPLEFT", speedBar, "TOPLEFT", 0, 0)
-    leftLine:SetPoint("BOTTOMLEFT", speedBar, "BOTTOMLEFT", 0, 0)
-    leftLine:SetWidth(1)
-    table.insert(borders, leftLine)
-
-    local rightLine = speedBar:CreateTexture(nil, "OVERLAY")
-    rightLine:SetColorTexture(0, 0, 0, 1)
-    rightLine:SetPoint("TOPRIGHT", speedBar, "TOPRIGHT", 0, 0)
-    rightLine:SetPoint("BOTTOMRIGHT", speedBar, "BOTTOMRIGHT", 0, 0)
-    rightLine:SetWidth(1)
-    table.insert(borders, rightLine)
-
-    speedBar.borderLines = borders
-
-    -- Always show borders for now
-    for _, line in ipairs(borders) do
-        line:Show()
-    end
+    AddBorderLines(speedBar, 1)
 
     -- Speed text
     speedText = speedBar:CreateFontString(nil, "OVERLAY")
@@ -935,29 +992,11 @@ function zSkyridingBar:CreateChargesBarFrame()
         chargesBarFrame = CreateFrame("Frame", nil, UIParent)
         local pt = profile.multiChargesBarPoint or "CENTER"
         chargesBarFrame:SetPoint(pt, UIParent, pt, profile.multiChargesBarX, profile.multiChargesBarY)
-        chargesBarFrame.editModeName = "zSkyridingBar - Charges"
-        LEM:AddFrame(chargesBarFrame, function(frame, layoutName, point, x, y)
-            zSkyridingBar.db.profile.multiChargesBarPoint = point
-            zSkyridingBar.db.profile.multiChargesBarX = x
-            zSkyridingBar.db.profile.multiChargesBarY = y
-        end, { point = defaults.profile.multiChargesBarPoint, x = defaults.profile.multiChargesBarX, y = defaults.profile.multiChargesBarY })
-        local activeLayout = LEM:GetActiveLayoutName()
-        chargesBarFrame:SetScale((activeLayout and profile.multiChargesBarScales[activeLayout]) or 1.0)
-        LEM:AddFrameSettings(chargesBarFrame, { {
-            kind = LEM.SettingType.Slider,
-            name = L["Scale"],
-            default = 1.0,
-            minValue = 0.5,
-            maxValue = 3.0,
-            valueStep = 0.05,
-            get = function(layoutName)
-                return zSkyridingBar.db.profile.multiChargesBarScales[layoutName] or 1.0
-            end,
-            set = function(layoutName, value)
-                zSkyridingBar.db.profile.multiChargesBarScales[layoutName] = value
-                if chargesBarFrame then chargesBarFrame:SetScale(value) end
-            end,
-        } })
+        RegisterMultiFrameWithLEM(chargesBarFrame,
+            "zSkyridingBar - Charges",
+            "multiChargesBarPoint", "multiChargesBarX", "multiChargesBarY",
+            "multiChargesBarScales",
+            defaults.profile.multiChargesBarPoint, defaults.profile.multiChargesBarX, defaults.profile.multiChargesBarY)
     end
     chargesBarFrame:SetSize(profile.chargeBarWidth, profile.chargeBarHeight)
     chargesBarFrame:SetFrameStrata(profile.frameStrata)
@@ -995,23 +1034,7 @@ function zSkyridingBar:CreateChargesBarFrame()
         bg:SetVertexColor(unpack(self.db.profile.chargeBarBackgroundColor))
         bar.bg = bg
 
-        -- Borders for all themes
-        for _, point in ipairs({
-            { "TOPLEFT",    "TOPRIGHT",    10, "horizontal" },
-            { "BOTTOMLEFT", "BOTTOMRIGHT", 10, "horizontal" },
-            { "TOPLEFT",    "BOTTOMLEFT",  10, "vertical" },
-            { "TOPRIGHT",   "BOTTOMRIGHT", 10, "vertical" },
-        }) do
-            local line = bar:CreateTexture(nil, "OVERLAY")
-            line:SetColorTexture(0, 0, 0, 1)
-            line:SetPoint(point[1], bar, point[1], 0, 0)
-            line:SetPoint(point[2], bar, point[2], 0, 0)
-            if point[4] == "horizontal" then
-                line:SetHeight(self.db.profile.chargeBarBorderSize or 0)
-            else
-                line:SetWidth(self.db.profile.chargeBarBorderSize or 0)
-            end
-        end
+        AddBorderLines(bar, self.db.profile.chargeBarBorderSize or 0)
 
         updateChargeBarColor(bar, false, false)
         chargeFrame.bars[i] = bar
@@ -1030,29 +1053,11 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
         speedAbilityFrame = CreateFrame("Frame", nil, UIParent)
         local pt = profile.multiSpeedAbilityPoint or "CENTER"
         speedAbilityFrame:SetPoint(pt, UIParent, pt, profile.multiSpeedAbilityX, profile.multiSpeedAbilityY)
-        speedAbilityFrame.editModeName = "zSkyridingBar - Ability"
-        LEM:AddFrame(speedAbilityFrame, function(frame, layoutName, point, x, y)
-            zSkyridingBar.db.profile.multiSpeedAbilityPoint = point
-            zSkyridingBar.db.profile.multiSpeedAbilityX = x
-            zSkyridingBar.db.profile.multiSpeedAbilityY = y
-        end, { point = defaults.profile.multiSpeedAbilityPoint, x = defaults.profile.multiSpeedAbilityX, y = defaults.profile.multiSpeedAbilityY })
-        local activeLayout = LEM:GetActiveLayoutName()
-        speedAbilityFrame:SetScale((activeLayout and profile.multiSpeedAbilityScales[activeLayout]) or 1.0)
-        LEM:AddFrameSettings(speedAbilityFrame, { {
-            kind = LEM.SettingType.Slider,
-            name = L["Scale"],
-            default = 1.0,
-            minValue = 0.5,
-            maxValue = 3.0,
-            valueStep = 0.05,
-            get = function(layoutName)
-                return zSkyridingBar.db.profile.multiSpeedAbilityScales[layoutName] or 1.0
-            end,
-            set = function(layoutName, value)
-                zSkyridingBar.db.profile.multiSpeedAbilityScales[layoutName] = value
-                if speedAbilityFrame then speedAbilityFrame:SetScale(value) end
-            end,
-        } })
+        RegisterMultiFrameWithLEM(speedAbilityFrame,
+            "zSkyridingBar - Ability",
+            "multiSpeedAbilityPoint", "multiSpeedAbilityX", "multiSpeedAbilityY",
+            "multiSpeedAbilityScales",
+            defaults.profile.multiSpeedAbilityPoint, defaults.profile.multiSpeedAbilityX, defaults.profile.multiSpeedAbilityY)
     end
     speedAbilityFrame:SetSize(40, 40)
     speedAbilityFrame:SetFrameStrata(profile.frameStrata)
@@ -1098,18 +1103,11 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     speedAbilityFrame.whirlingSurgeShineAnimGroup = shineAnimGroup
 
     -- Pre-create reusable fade animation groups (created once; reused with Stop/Play to avoid per-tick allocation)
-    local shineFadeAnimGroup = whirlingSurgeShine:CreateAnimationGroup()
-    local shineFadeAnim = shineFadeAnimGroup:CreateAnimation("Alpha")
-    shineFadeAnim:SetDuration(1)
-    shineFadeAnim:SetFromAlpha(1)
-    shineFadeAnim:SetToAlpha(0)
-    shineFadeAnim:SetOrder(1)
-    shineFadeAnimGroup:SetScript("OnFinished", function()
+    speedAbilityFrame.shineFadeAnimGroup = CreateFadeAnimGroup(whirlingSurgeShine, 1, function()
         if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
             speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
         end
     end)
-    speedAbilityFrame.shineFadeAnimGroup = shineFadeAnimGroup
 
     -- Border glow
     local staticChargeBorder = speedAbilityFrame:CreateTexture(nil, "BORDER")
@@ -1122,29 +1120,15 @@ function zSkyridingBar:CreateSpeedAbilityFrame()
     speedAbilityFrame.border = staticChargeBorder
 
     -- Pre-create reusable icon fade animation groups
-    local staticChargeIconFadeAnimGroup = staticChargeIcon:CreateAnimationGroup()
-    local staticChargeIconFadeAnim = staticChargeIconFadeAnimGroup:CreateAnimation("Alpha")
-    staticChargeIconFadeAnim:SetDuration(1)
-    staticChargeIconFadeAnim:SetFromAlpha(1)
-    staticChargeIconFadeAnim:SetToAlpha(0)
-    staticChargeIconFadeAnim:SetOrder(1)
-    staticChargeIconFadeAnimGroup:SetScript("OnFinished", function()
+    speedAbilityFrame.staticChargeIconFadeAnimGroup = CreateFadeAnimGroup(staticChargeIcon, 1, function()
         staticChargeIcon:SetAlpha(0)
         staticChargeIcon:Hide()
     end)
-    speedAbilityFrame.staticChargeIconFadeAnimGroup = staticChargeIconFadeAnimGroup
 
-    local whirlingSurgeIconFadeAnimGroup = whirlingSurgeIcon:CreateAnimationGroup()
-    local whirlingSurgeIconFadeAnim = whirlingSurgeIconFadeAnimGroup:CreateAnimation("Alpha")
-    whirlingSurgeIconFadeAnim:SetDuration(1)
-    whirlingSurgeIconFadeAnim:SetFromAlpha(1)
-    whirlingSurgeIconFadeAnim:SetToAlpha(0)
-    whirlingSurgeIconFadeAnim:SetOrder(1)
-    whirlingSurgeIconFadeAnimGroup:SetScript("OnFinished", function()
+    speedAbilityFrame.whirlingSurgeIconFadeAnimGroup = CreateFadeAnimGroup(whirlingSurgeIcon, 1, function()
         whirlingSurgeIcon:SetAlpha(0)
         whirlingSurgeIcon:Hide()
     end)
-    speedAbilityFrame.whirlingSurgeIconFadeAnimGroup = whirlingSurgeIconFadeAnimGroup
 
     -- Stack count text
     staticChargeText = speedAbilityFrame:CreateFontString(nil, "OVERLAY")
@@ -1179,29 +1163,11 @@ function zSkyridingBar:CreateSecondWindFrame()
         secondWindFrame = CreateFrame("Frame", nil, UIParent)
         local pt = profile.multiSecondWindPoint or "CENTER"
         secondWindFrame:SetPoint(pt, UIParent, pt, profile.multiSecondWindX, profile.multiSecondWindY)
-        secondWindFrame.editModeName = "zSkyridingBar - Second Wind"
-        LEM:AddFrame(secondWindFrame, function(frame, layoutName, point, x, y)
-            zSkyridingBar.db.profile.multiSecondWindPoint = point
-            zSkyridingBar.db.profile.multiSecondWindX = x
-            zSkyridingBar.db.profile.multiSecondWindY = y
-        end, { point = defaults.profile.multiSecondWindPoint, x = defaults.profile.multiSecondWindX, y = defaults.profile.multiSecondWindY })
-        local activeLayout = LEM:GetActiveLayoutName()
-        secondWindFrame:SetScale((activeLayout and profile.multiSecondWindScales[activeLayout]) or 1.0)
-        LEM:AddFrameSettings(secondWindFrame, { {
-            kind = LEM.SettingType.Slider,
-            name = L["Scale"],
-            default = 1.0,
-            minValue = 0.5,
-            maxValue = 3.0,
-            valueStep = 0.05,
-            get = function(layoutName)
-                return zSkyridingBar.db.profile.multiSecondWindScales[layoutName] or 1.0
-            end,
-            set = function(layoutName, value)
-                zSkyridingBar.db.profile.multiSecondWindScales[layoutName] = value
-                if secondWindFrame then secondWindFrame:SetScale(value) end
-            end,
-        } })
+        RegisterMultiFrameWithLEM(secondWindFrame,
+            "zSkyridingBar - Second Wind",
+            "multiSecondWindPoint", "multiSecondWindX", "multiSecondWindY",
+            "multiSecondWindScales",
+            defaults.profile.multiSecondWindPoint, defaults.profile.multiSecondWindX, defaults.profile.multiSecondWindY)
     end
     secondWindFrame:SetSize(profile.secondWindBarWidth, profile.secondWindBarHeight)
     secondWindFrame:SetFrameStrata(profile.frameStrata)
@@ -1219,23 +1185,7 @@ function zSkyridingBar:CreateSecondWindFrame()
     secondWindBar:SetMinMaxValues(0, 100 * BAR_MULTIPLIER)
     secondWindBar:SetValue(0)
 
-    -- Borders for all themes
-    for _, point in ipairs({
-        { "TOPLEFT",    "TOPRIGHT",    1, "horizontal" },
-        { "BOTTOMLEFT", "BOTTOMRIGHT", 1, "horizontal" },
-        { "TOPLEFT",    "BOTTOMLEFT",  1, "vertical" },
-        { "TOPRIGHT",   "BOTTOMRIGHT", 1, "vertical" },
-    }) do
-        local line = secondWindBar:CreateTexture(nil, "OVERLAY")
-        line:SetColorTexture(0, 0, 0, 1)
-        line:SetPoint(point[1], secondWindBar, point[1], 0, 0)
-        line:SetPoint(point[2], secondWindBar, point[2], 0, 0)
-        if point[4] == "horizontal" then
-            line:SetHeight(1)
-        else
-            line:SetWidth(1)
-        end
-    end
+    AddBorderLines(secondWindBar, 1)
 
 
     -- Background
@@ -1762,271 +1712,123 @@ function zSkyridingBar:UpdateStaticChargeAndWhirlingSurge()
 
     local isGliding, isFlying = C_PlayerInfo.GetGlidingInfo()
     if not isGliding and not isFlying then
-        if speedAbilityFrame then speedAbilityFrame:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-            speedAbilityFrame.whirlingSurgeReverseFill:Hide()
-        end
+        speedAbilityFrame:Hide()
+        speedAbilityFrame.whirlingSurgeReverseFill:Hide()
         return
     end
 
-    -- Check for Static Charge buff
+    -- Branch 1: Static Charge buff is active
     local staticChargeAura = C_UnitAuras.GetPlayerAuraBySpellID(STATIC_CHARGE_BUFF_ID)
     if staticChargeAura and (staticChargeAura.applications or 0) > 0 then
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        if staticChargeIcon then staticChargeIcon:Show() end
-        if staticChargeText then staticChargeText:Show() end
-        if staticChargeText then staticChargeText:SetText(staticChargeAura.applications or 0) end
-        if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
-        if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
-        -- hide the whirling surge reverse fill if lightning rush is not actually on cooldown
-        local lightningSurgeCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-        if not lightningSurgeCooldownInfo or lightningSurgeCooldownInfo.duration <= 0 or lightningSurgeCooldownInfo.startTime <= 0 then
-            if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-                speedAbilityFrame.whirlingSurgeReverseFill:Hide()
-            end
-            if speedAbilityFrame and speedAbilityFrame.cooldown then
-                speedAbilityFrame.cooldown:Hide()
-            end
-            if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
-                speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
-            end
-        end
-        if staticChargeAura.icon and staticChargeIcon then
+        speedAbilityFrame:Show()
+        staticChargeIcon:Show()
+        staticChargeText:Show()
+        staticChargeText:SetText(staticChargeAura.applications or 0)
+        whirlingSurgeIcon:Hide()
+
+        if staticChargeAura.icon then
             staticChargeIcon:SetTexture(staticChargeAura.icon)
             staticChargeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         end
         if (staticChargeAura.applications or 0) == 10 then
-            if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Show() end
+            speedAbilityFrame.border:Show()
         else
-            if staticChargeIcon then staticChargeIcon:SetVertexColor(1, 1, 1) end
-            if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
+            staticChargeIcon:SetVertexColor(1, 1, 1)
+            speedAbilityFrame.border:Hide()
         end
-        if speedAbilityFrame and speedAbilityFrame.cooldown then
+
+        -- Check LR cooldown once; hide overlay if not on CD, show fill if it is
+        local lrCooldown = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
+        if not lrCooldown or lrCooldown.duration <= 0 or lrCooldown.startTime <= 0 then
+            speedAbilityFrame.whirlingSurgeReverseFill:Hide()
             speedAbilityFrame.cooldown:Hide()
-        end
-        local lightningRushCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-        if lightningRushCooldownInfo and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
-            if lightningRushCooldownInfo.duration < 2 then
+            speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
+        else
+            if lrCooldown.duration < 2 then
                 abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
                 return
             end
             -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
-            if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
-                speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
-            end
-            if staticChargeIcon then staticChargeIcon:SetAlpha(1) end
-            if speedAbilityFrame and speedAbilityFrame.cooldown then
-                speedAbilityFrame.cooldown:SetCooldown(lightningRushCooldownInfo.startTime,
-                    lightningRushCooldownInfo.duration)
-                speedAbilityFrame.cooldown:Show()
-            end
-            -- Show and update reverse fill overlay
-            if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-                local now = GetTime()
-                local elapsed = now - lightningRushCooldownInfo.startTime
-                local progress = math.min(1, math.max(0, elapsed / lightningRushCooldownInfo.duration))
-                local fillHeight = 36 * (1 - progress)
-                speedAbilityFrame.whirlingSurgeReverseFill:SetHeight(fillHeight)
-                speedAbilityFrame.whirlingSurgeReverseFill:Show()
-                if fillHeight > 1 then fillActive = true end
-                -- Trigger shine when cooldown just ends
-                if fillHeight and fillHeight <= 1 and not speedAbilityFrame._shineActive then
-                    speedAbilityFrame._shineActive = true
-                    if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
-                        speedAbilityFrame
-                            .whirlingSurgeShine:SetAlpha(1)
-                    end
-                    if staticChargeIcon then staticChargeIcon:SetAlpha(1) end
-                    if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShineAnimGroup then
-                        speedAbilityFrame.whirlingSurgeShineAnimGroup:Play()
-                    end
-                    -- Fade out both shine and icon over 1s if no Static Charge stacks remain
-                    local staticChargeCheck = C_UnitAuras.GetPlayerAuraBySpellID(STATIC_CHARGE_BUFF_ID)
-                    if not staticChargeCheck or (staticChargeCheck.applications or 0) == 0 then
-                        if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-                            speedAbilityFrame.shineFadeAnimGroup:Stop()
-                            speedAbilityFrame.shineFadeAnimGroup:Play()
-                        end
-                        if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
-                            speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
-                            speedAbilityFrame.staticChargeIconFadeAnimGroup:Play()
-                        end
-                    else
-                        if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-                            speedAbilityFrame.shineFadeAnimGroup:Stop()
-                            speedAbilityFrame.shineFadeAnimGroup:Play()
-                        end
-                    end
-                    C_Timer.After(1, function()
-                        if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-                    end)
-                end
-            else
-                if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-            end
+            speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
+            staticChargeIcon:SetAlpha(1)
+            fillActive = ApplyCooldownFill(
+                lrCooldown.startTime, lrCooldown.duration,
+                staticChargeIcon, speedAbilityFrame.staticChargeIconFadeAnimGroup,
+                false)  -- only fade icon if no SC stacks remain at cooldown end
         end
 
         abilityFrameDirty = fillActive
         return
     end
 
-    -- If no Static Charge, check Lightning Rush cooldown
-    local lightningRushCooldownInfo = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
-    if lightningRushCooldownInfo and lightningRushCooldownInfo.duration > 0 and lightningRushCooldownInfo.startTime > 0 then
-        if lightningRushCooldownInfo.duration < 2 then
+    -- Branch 2: No Static Charge stacks, but Lightning Rush is on cooldown
+    local lrCooldown = C_Spell.GetSpellCooldown(LIGHTNING_RUSH_SPELL_ID)
+    if lrCooldown and lrCooldown.duration > 0 and lrCooldown.startTime > 0 then
+        if lrCooldown.duration < 2 then
             abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
             return
         end
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
-        if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
-            speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
-        end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeIconFadeAnimGroup then
-            speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
-        end
-        if staticChargeIcon then staticChargeIcon:SetAlpha(1) staticChargeIcon:Show() end
-        if staticChargeText then staticChargeText:Hide() end
-        if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
-        local staticChargeSpellInfo = C_Spell.GetSpellInfo(STATIC_CHARGE_BUFF_ID)
-        if staticChargeSpellInfo and staticChargeSpellInfo.iconID and staticChargeIcon then
-            staticChargeIcon:SetTexture(staticChargeSpellInfo.iconID)
+        speedAbilityFrame:Show()
+        -- Cancel any in-progress icon fades so a quick re-cast restores full visibility
+        speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
+        speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
+        staticChargeIcon:SetAlpha(1)
+        staticChargeIcon:Show()
+        staticChargeText:Hide()
+        whirlingSurgeIcon:Hide()
+        speedAbilityFrame.border:Hide()
+        local spellInfo = C_Spell.GetSpellInfo(STATIC_CHARGE_BUFF_ID)
+        if spellInfo and spellInfo.iconID then
+            staticChargeIcon:SetTexture(spellInfo.iconID)
             staticChargeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         end
-        if staticChargeIcon then staticChargeIcon:SetVertexColor(1, 1, 1) end
-        if speedAbilityFrame and speedAbilityFrame.cooldown then
-            speedAbilityFrame.cooldown:SetCooldown(lightningRushCooldownInfo.startTime,
-                lightningRushCooldownInfo.duration)
-            speedAbilityFrame.cooldown:Show()
-        end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-            local now = GetTime()
-            local elapsed = now - lightningRushCooldownInfo.startTime
-            local progress = math.min(1, math.max(0, elapsed / lightningRushCooldownInfo.duration))
-            local fillHeight = 36 * (1 - progress)
-            speedAbilityFrame.whirlingSurgeReverseFill:SetHeight(fillHeight)
-            speedAbilityFrame.whirlingSurgeReverseFill:Show()
-            if fillHeight > 1 then fillActive = true end
-            if fillHeight and fillHeight <= 1 and not (speedAbilityFrame and speedAbilityFrame._shineActive) then
-                if speedAbilityFrame then speedAbilityFrame._shineActive = true end
-                if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
-                    speedAbilityFrame.whirlingSurgeShine
-                        :SetAlpha(1)
-                end
-                if staticChargeIcon then staticChargeIcon:SetAlpha(1) end
-                if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShineAnimGroup then
-                    speedAbilityFrame.whirlingSurgeShineAnimGroup:Play()
-                end
-                local staticChargeCheck = C_UnitAuras.GetPlayerAuraBySpellID(STATIC_CHARGE_BUFF_ID)
-                if not staticChargeCheck or (staticChargeCheck.applications or 0) == 0 then
-                    if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-                        speedAbilityFrame.shineFadeAnimGroup:Stop()
-                        speedAbilityFrame.shineFadeAnimGroup:Play()
-                    end
-                    if speedAbilityFrame and speedAbilityFrame.staticChargeIconFadeAnimGroup then
-                        speedAbilityFrame.staticChargeIconFadeAnimGroup:Stop()
-                        speedAbilityFrame.staticChargeIconFadeAnimGroup:Play()
-                    end
-                else
-                    if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-                        speedAbilityFrame.shineFadeAnimGroup:Stop()
-                        speedAbilityFrame.shineFadeAnimGroup:Play()
-                    end
-                end
-                C_Timer.After(1, function()
-                    if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-                end)
-            end
-        else
-            if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-        end
+        staticChargeIcon:SetVertexColor(1, 1, 1)
+        fillActive = ApplyCooldownFill(
+            lrCooldown.startTime, lrCooldown.duration,
+            staticChargeIcon, speedAbilityFrame.staticChargeIconFadeAnimGroup,
+            true)  -- always fade icon when cooldown expires
         abilityFrameDirty = fillActive
         return
     end
 
+    -- Branch 3: Whirling Surge is on cooldown
     local cooldownInfo = C_Spell.GetSpellCooldown(WHIRLING_SURGE_SPELL_ID)
-    local shineTriggered = false
     if cooldownInfo and cooldownInfo.duration > 0 and cooldownInfo.startTime > 0 then
         if cooldownInfo.duration < 2 then
             abilityFrameDirty = true  -- GCD still active; keep polling until real cooldown registers
             return
         end
-        if speedAbilityFrame then speedAbilityFrame:Show() end
-        -- Cancel any in-progress icon fade so a quick re-cast restores full visibility
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeIconFadeAnimGroup then
-            speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
-        end
-        if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-            speedAbilityFrame.shineFadeAnimGroup:Stop()
-            if speedAbilityFrame.whirlingSurgeShine then speedAbilityFrame.whirlingSurgeShine:SetAlpha(0) end
-        end
-        if whirlingSurgeIcon then whirlingSurgeIcon:SetAlpha(1) whirlingSurgeIcon:Show() end
-        if staticChargeIcon then staticChargeIcon:Hide() end
-        if staticChargeText then staticChargeText:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.border then speedAbilityFrame.border:Hide() end
+        speedAbilityFrame:Show()
+        -- Cancel any in-progress icon/shine fades so a quick re-cast restores full visibility
+        speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
+        speedAbilityFrame.shineFadeAnimGroup:Stop()
+        speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
+        whirlingSurgeIcon:SetAlpha(1)
+        whirlingSurgeIcon:Show()
+        staticChargeIcon:Hide()
+        staticChargeText:Hide()
+        speedAbilityFrame.border:Hide()
         local spellInfo = C_Spell.GetSpellInfo(WHIRLING_SURGE_SPELL_ID)
-        if spellInfo and spellInfo.iconID and whirlingSurgeIcon then
+        if spellInfo and spellInfo.iconID then
             whirlingSurgeIcon:SetTexture(spellInfo.iconID)
             whirlingSurgeIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         end
-        if speedAbilityFrame and speedAbilityFrame.cooldown then
-            speedAbilityFrame.cooldown:SetCooldown(cooldownInfo.startTime, cooldownInfo.duration)
-            speedAbilityFrame.cooldown:Show()
-        end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-            local now = GetTime()
-            local elapsed = now - cooldownInfo.startTime
-            local progress = math.min(1, math.max(0, elapsed / cooldownInfo.duration))
-            local fillHeight = 36 * (1 - progress)
-            speedAbilityFrame.whirlingSurgeReverseFill:SetHeight(fillHeight)
-            speedAbilityFrame.whirlingSurgeReverseFill:Show()
-            if fillHeight > 1 then fillActive = true end
-            if fillHeight and fillHeight <= 1 and not (speedAbilityFrame and speedAbilityFrame._shineActive) then
-                if speedAbilityFrame then speedAbilityFrame._shineActive = true end
-                if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
-                    speedAbilityFrame.whirlingSurgeShine
-                        :SetAlpha(1)
-                end
-                if whirlingSurgeIcon then whirlingSurgeIcon:SetAlpha(1) end
-                if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShineAnimGroup then
-                    speedAbilityFrame.whirlingSurgeShineAnimGroup:Play()
-                end
-                if speedAbilityFrame and speedAbilityFrame.whirlingSurgeIconFadeAnimGroup then
-                    speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Stop()
-                    speedAbilityFrame.whirlingSurgeIconFadeAnimGroup:Play()
-                end
-                if speedAbilityFrame and speedAbilityFrame.shineFadeAnimGroup then
-                    speedAbilityFrame.shineFadeAnimGroup:Stop()
-                    speedAbilityFrame.shineFadeAnimGroup:Play()
-                end
-                C_Timer.After(1, function()
-                    if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-                end)
-            end
-        else
-            if speedAbilityFrame then speedAbilityFrame._shineActive = false end
-        end
+        fillActive = ApplyCooldownFill(
+            cooldownInfo.startTime, cooldownInfo.duration,
+            whirlingSurgeIcon, speedAbilityFrame.whirlingSurgeIconFadeAnimGroup,
+            true)  -- always fade icon when cooldown expires
         abilityFrameDirty = fillActive
         return
-    else
-        if whirlingSurgeIcon then whirlingSurgeIcon:SetAlpha(1) end
-        if whirlingSurgeIcon then whirlingSurgeIcon:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-            speedAbilityFrame.whirlingSurgeReverseFill:Hide()
-        end
-        if speedAbilityFrame and speedAbilityFrame.cooldown then speedAbilityFrame.cooldown:Hide() end
-        if speedAbilityFrame and speedAbilityFrame.whirlingSurgeShine then
-            speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
-        end
-        if speedAbilityFrame then speedAbilityFrame._shineActive = false end
     end
 
-    -- If neither, hide the frame and overlay
-    if speedAbilityFrame then speedAbilityFrame:Hide() end
-    if speedAbilityFrame and speedAbilityFrame.whirlingSurgeReverseFill then
-        speedAbilityFrame.whirlingSurgeReverseFill:Hide()
-    end
+    -- No ability active: reset everything and hide
+    whirlingSurgeIcon:SetAlpha(1)
+    whirlingSurgeIcon:Hide()
+    speedAbilityFrame.whirlingSurgeReverseFill:Hide()
+    speedAbilityFrame.cooldown:Hide()
+    speedAbilityFrame.whirlingSurgeShine:SetAlpha(0)
+    speedAbilityFrame._shineActive = false
+    speedAbilityFrame:Hide()
 end
 
 function zSkyridingBar:UpdateSecondWind()
