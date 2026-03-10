@@ -1,0 +1,10 @@
+.github/copilot-instructions.md
+Reference/
+References/
+*.zip
+venv/
+__pycache__/
+.vscode/
+Tools/output/
+Libs/zSettingsFrame-1.0
+Libs/zSignalReact-1.0
